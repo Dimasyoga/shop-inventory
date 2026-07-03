@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Orders{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h2>Orders</h2>
+    <button class="btn btn-primary" onclick="openOrderModal()">+ New Order</button>
+</div>
+
+<div class="card">
+    <div class="table-controls">
+        <input type="text" id="searchOrder" class="search-input" placeholder="Search by order #..." oninput="loadOrders()">
+        <select id="filterStatus" onchange="loadOrders()">
+            <option value="">All Status</option>
+            <option value="draft">Draft</option>
+            <option value="confirmed">Confirmed</option>
+            <option value="completed">Completed</option>
+        </select>
+    </div>
+    <table class="data-table">
+        <thead>
+            <tr><th>Order #</th><th>Date</th><th>Items</th><th>Total</th><th>Status</th><th>Actions</th></tr>
+        </thead>
+        <tbody id="ordersBody">
+        </tbody>
+    </table>
+</div>
+
+<!-- New Order Modal -->
+<div class="modal" id="orderModal">
+    <div class="modal-content" style="max-width: 600px">
+        <div class="modal-header">
+            <h3>New Order</h3>
+            <span class="modal-close" onclick="closeOrderModal()">&times;</span>
+        </div>
+        <div id="orderItems" style="margin-bottom:16px"></div>
+        <button class="btn btn-secondary" onclick="addOrderItem()" style="margin-bottom:16px">+ Add Item</button>
+        <div style="text-align:right;font-size:18px;font-weight:700;margin-bottom:16px">
+            Total: <span id="orderTotal">Rp 0</span>
+        </div>
+        <div class="modal-actions">
+            <button type="button" class="btn btn-secondary" onclick="closeOrderModal()">Cancel</button>
+            <button type="button" class="btn btn-primary" onclick="createOrder()">Create Order</button>
+        </div>
+    </div>
+</div>
+
+<!-- Order Detail Modal -->
+<div class="modal" id="orderDetailModal">
+    <div class="modal-content" style="max-width: 600px">
+        <div class="modal-header">
+            <h3 id="detailOrderId">Order #</h3>
+            <span class="modal-close" onclick="closeOrderDetail()">&times;</span>
+        </div>
+        <div id="orderDetailContent"></div>
+    </div>
+</div>
+
+<script>
+const PRODUCTS = [
+    {% for p in products %}
+    {id: {{ p['id'] }}, name: "{{ p['name'] }}", price: {{ p['price'] }}, stock: {{ p['stock_qty'] }}},
+    {% endfor %}
+];
+</script>
+{% endblock %}

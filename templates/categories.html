@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Categories{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h2>Categories</h2>
+    <button class="btn btn-primary" onclick="openCategoryModal()">+ Add Category</button>
+</div>
+
+<div class="card">
+    <table class="data-table">
+        <thead>
+            <tr><th>Name</th><th>Created</th><th>Actions</th></tr>
+        </thead>
+        <tbody id="categoriesBody">
+            {% for c in categories %}
+            <tr data-id="{{ c['id'] }}">
+                <td>{{ c['name'] }}</td>
+                <td>{{ c['created_at'] }}</td>
+                <td class="action-cell">
+                    <button class="btn-icon" onclick="editCategory({{ c['id'] }}, '{{ c['name'] }}')" title="Edit">✏️</button>
+                    <button class="btn-icon" onclick="deleteCategory({{ c['id'] }})" title="Delete">🗑️</button>
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="3" class="empty-row">No categories yet</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<!-- Category Modal -->
+<div class="modal" id="categoryModal">
+    <div class="modal-content" style="max-width: 400px">
+        <div class="modal-header">
+            <h3 id="catModalTitle">Add Category</h3>
+            <span class="modal-close" onclick="closeCategoryModal()">&times;</span>
+        </div>
+        <form onsubmit="saveCategory(event)">
+            <input type="hidden" id="catId">
+            <div class="form-group">
+                <label>Category Name *</label>
+                <input type="text" id="catName" required>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" onclick="closeCategoryModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary">Save</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
