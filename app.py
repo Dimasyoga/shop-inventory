@@ -56,9 +56,18 @@ def dashboard():
         SELECT COUNT(*) as cnt FROM products
         WHERE is_archived = 0 AND stock_qty <= reorder_threshold
     """).fetchone()['cnt']
-    today_revenue = db.execute("""
+    month_revenue = db.execute("""
         SELECT COALESCE(SUM(total_amount), 0) as total FROM orders
-        WHERE status = 'completed' AND date(created_at) = date('now')
+        WHERE status = 'completed' AND created_at >= date('now', '-30 days')
+    """).fetchone()['total']
+    total_restock_cost = db.execute("""
+        SELECT COALESCE(SUM(total_cost), 0) as total FROM restock_batches
+        WHERE created_at >= date('now', '-30 days')
+    """).fetchone()['total']
+    net_profit = month_revenue - total_restock_cost
+    total_product_value = db.execute("""
+        SELECT COALESCE(SUM(price * stock_qty), 0) as total FROM products
+        WHERE is_archived = 0
     """).fetchone()['total']
     recent_orders = db.execute("""
         SELECT o.*, p.name as product_name
@@ -79,7 +88,10 @@ def dashboard():
         total_products=total_products,
         total_orders=total_orders,
         low_stock_count=low_stock,
-        today_revenue=format_rupiah(today_revenue),
+        month_revenue=format_rupiah(month_revenue),
+        net_profit=format_rupiah(net_profit),
+        total_product_value=format_rupiah(total_product_value),
+        total_restock_cost_raw=total_restock_cost,
         recent_orders=recent_orders,
         low_stock_products=low_stock_products,
         format_rupiah=format_rupiah
@@ -327,11 +339,6 @@ def api_confirm_order(id):
         return jsonify({'error': 'Order not found'}), 404
     if order['status'] != 'draft':
         return jsonify({'error': 'Only draft orders can be confirmed'}), 400
-    items = g.db.execute("SELECT * FROM order_items WHERE order_id = ?", (id,)).fetchall()
-    for item in items:
-        current = g.db.execute("SELECT stock_qty FROM products WHERE id = ?", (item['product_id'],)).fetchone()
-        new_qty = current['stock_qty'] - item['quantity']
-        g.db.execute("UPDATE products SET stock_qty = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (new_qty, item['product_id']))
     g.db.execute("UPDATE orders SET status = 'confirmed', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (id,))
     g.db.commit()
     return jsonify({'success': True})
@@ -344,6 +351,14 @@ def api_complete_order(id):
         return jsonify({'error': 'Order not found'}), 404
     if order['status'] != 'confirmed':
         return jsonify({'error': 'Only confirmed orders can be completed'}), 400
+    items = g.db.execute("SELECT * FROM order_items WHERE order_id = ?", (id,)).fetchall()
+    for item in items:
+        current = g.db.execute("SELECT stock_qty FROM products WHERE id = ?", (item['product_id'],)).fetchone()
+        new_qty = current['stock_qty'] - item['quantity']
+        if new_qty < 0:
+            g.db.rollback()
+            return jsonify({'error': f"Insufficient stock for product #{item['product_id']}"}, 400)
+        g.db.execute("UPDATE products SET stock_qty = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (new_qty, item['product_id']))
     g.db.execute("UPDATE orders SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (id,))
     g.db.commit()
     return jsonify({'success': True})
@@ -354,18 +369,197 @@ def api_cancel_order(id):
     order = g.db.execute("SELECT * FROM orders WHERE id = ?", (id,)).fetchone()
     if not order:
         return jsonify({'error': 'Order not found'}), 404
-    if order['status'] not in ('draft', 'confirmed'):
+    if order['status'] == 'completed':
         return jsonify({'error': 'Cannot cancel completed orders'}), 400
-    if order['status'] == 'confirmed':
-        items = g.db.execute("SELECT * FROM order_items WHERE order_id = ?", (id,)).fetchall()
-        for item in items:
-            current = g.db.execute("SELECT stock_qty FROM products WHERE id = ?", (item['product_id'],)).fetchone()
-            new_qty = current['stock_qty'] + item['quantity']
-            g.db.execute("UPDATE products SET stock_qty = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (new_qty, item['product_id']))
     g.db.execute("DELETE FROM order_items WHERE order_id = ?", (id,))
     g.db.execute("DELETE FROM orders WHERE id = ?", (id,))
     g.db.commit()
     return jsonify({'success': True})
+
+# --- Restock ---
+@app.route('/restock')
+@login_required
+def restock_page():
+    products = g.db.execute("SELECT * FROM products WHERE is_archived = 0 AND stock_qty >= 0 ORDER BY name").fetchall()
+    return render_template('restock.html', products=products, format_rupiah=format_rupiah)
+
+@app.route('/api/restock', methods=['POST'])
+@login_required
+def api_restock():
+    data = request.get_json()
+    items = data.get('items', [])
+    batch_total_cost = float(data.get('total_cost', 0))
+    if not items:
+        return jsonify({'error': 'At least one item required'}), 400
+    total_qty = 0
+    for item in items:
+        product_id = item.get('product_id')
+        qty_added = int(item.get('qty', 0))
+        if not product_id or qty_added <= 0:
+            return jsonify({'error': 'Valid product and quantity required'}), 400
+        product = g.db.execute("SELECT * FROM products WHERE id = ?", (product_id,)).fetchone()
+        if not product:
+            return jsonify({'error': f"Product {product_id} not found"}), 404
+        total_qty += qty_added
+    cur = g.db.execute("INSERT INTO restock_batches (total_cost) VALUES (?)", (batch_total_cost,))
+    batch_id = cur.lastrowid
+    for item in items:
+        product_id = item.get('product_id')
+        qty_added = int(item.get('qty', 0))
+        allocated_cost = (qty_added / total_qty) * batch_total_cost if total_qty > 0 else 0
+        product = g.db.execute("SELECT * FROM products WHERE id = ?", (product_id,)).fetchone()
+        new_qty = product['stock_qty'] + qty_added
+        g.db.execute("UPDATE products SET stock_qty = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (new_qty, product_id))
+        g.db.execute("INSERT INTO restock_items (batch_id, product_id, qty_added, allocated_cost) VALUES (?, ?, ?, ?)",
+                     (batch_id, product_id, qty_added, allocated_cost))
+    g.db.commit()
+    return jsonify({'success': True, 'total_cost': batch_total_cost})
+
+@app.route('/api/restock/history', methods=['GET'])
+@login_required
+def api_restock_history():
+    period = request.args.get('period', 'all')
+    query = """
+        SELECT rb.id, rb.total_cost, rb.created_at
+        FROM restock_batches rb
+        ORDER BY rb.created_at DESC
+    """
+    params = []
+    if period == 'today':
+        query += " WHERE date(rb.created_at) = date('now')"
+    elif period == 'week':
+        query += " WHERE rb.created_at >= date('now', '-7 days')"
+    elif period == 'month':
+        query += " WHERE rb.created_at >= date('now', '-30 days')"
+    elif period == 'year':
+        query += " WHERE rb.created_at >= date('now', '-365 days')"
+    batches = g.db.execute(query, params).fetchall()
+    result = []
+    for b in batches:
+        items = g.db.execute("""
+            SELECT ri.*, p.name as product_name, p.sku as product_sku
+            FROM restock_items ri
+            JOIN products p ON ri.product_id = p.id
+            WHERE ri.batch_id = ?
+            ORDER BY ri.id
+        """, (b['id'],)).fetchall()
+        result.append({
+            'id': b['id'],
+            'total_cost': b['total_cost'],
+            'created_at': b['created_at'],
+            'items': [dict(i) for i in items]
+        })
+    return jsonify(result)
+
+# --- Sales Dashboard ---
+@app.route('/sales')
+@login_required
+def sales_page():
+    return render_template('sales.html', format_rupiah=format_rupiah)
+
+@app.route('/api/sales/summary', methods=['GET'])
+@login_required
+def api_sales_summary():
+    period = request.args.get('period', 'all')
+    db = g.db
+    query = """
+        SELECT
+            COALESCE(SUM(o.total_amount), 0) as total_revenue,
+            COUNT(DISTINCT o.id) as total_orders,
+            COUNT(DISTINCT oi.product_id) as unique_skus,
+            COALESCE(SUM(oi.quantity), 0) as total_items_sold
+        FROM orders o
+        JOIN order_items oi ON o.id = oi.order_id
+        WHERE o.status = 'completed'
+    """
+    params = []
+    if period == 'today':
+        query += " AND date(o.created_at) = date('now')"
+    elif period == 'week':
+        query += " AND o.created_at >= date('now', '-7 days')"
+    elif period == 'month':
+        query += " AND o.created_at >= date('now', '-30 days')"
+    elif period == 'year':
+        query += " AND o.created_at >= date('now', '-365 days')"
+    row = db.execute(query, params).fetchone()
+    restock_query = "SELECT COALESCE(SUM(total_cost), 0) as total FROM restock_batches"
+    if period == 'today':
+        restock_query += " WHERE date(created_at) = date('now')"
+    elif period == 'week':
+        restock_query += " WHERE created_at >= date('now', '-7 days')"
+    elif period == 'month':
+        restock_query += " WHERE created_at >= date('now', '-30 days')"
+    elif period == 'year':
+        restock_query += " WHERE created_at >= date('now', '-365 days')"
+    restock_cost = db.execute(restock_query).fetchone()['total']
+    return jsonify({
+        'total_revenue': row['total_revenue'],
+        'total_orders': row['total_orders'],
+        'unique_skus': row['unique_skus'],
+        'total_items_sold': row['total_items_sold'],
+        'restock_cost': restock_cost,
+        'net_profit': row['total_revenue'] - restock_cost
+    })
+
+@app.route('/api/sales/product-value', methods=['GET'])
+@login_required
+def api_sales_product_value():
+    total = g.db.execute("""
+        SELECT COALESCE(SUM(price * stock_qty), 0) as total FROM products
+        WHERE is_archived = 0
+    """).fetchone()['total']
+    return jsonify({'total_value': total})
+
+@app.route('/api/sales/trend', methods=['GET'])
+@login_required
+def api_sales_trend():
+    period = request.args.get('period', 'all')
+    db = g.db
+    query = """
+        SELECT date(o.created_at) as sale_date, SUM(o.total_amount) as daily_revenue
+        FROM orders o
+        WHERE o.status = 'completed'
+    """
+    params = []
+    if period == 'today':
+        query += " AND date(o.created_at) = date('now')"
+    elif period == 'week':
+        query += " AND o.created_at >= date('now', '-7 days')"
+    elif period == 'month':
+        query += " AND o.created_at >= date('now', '-30 days')"
+    elif period == 'year':
+        query += " AND o.created_at >= date('now', '-365 days')"
+    query += " GROUP BY date(o.created_at) ORDER BY sale_date ASC"
+    rows = db.execute(query, params).fetchall()
+    return jsonify([{'date': r['sale_date'], 'revenue': r['daily_revenue']} for r in rows])
+
+@app.route('/api/sales/top-products', methods=['GET'])
+@login_required
+def api_sales_top_products():
+    period = request.args.get('period', 'all')
+    db = g.db
+    base_query = """
+        SELECT p.id, p.name, p.sku, SUM(oi.quantity) as total_sold, SUM(oi.subtotal) as total_revenue
+        FROM order_items oi
+        JOIN orders o ON oi.order_id = o.id
+        JOIN products p ON oi.product_id = p.id
+        WHERE o.status = 'completed'
+    """
+    params = []
+    if period == 'today':
+        base_query += " AND date(o.created_at) = date('now')"
+    elif period == 'week':
+        base_query += " AND o.created_at >= date('now', '-7 days')"
+    elif period == 'month':
+        base_query += " AND o.created_at >= date('now', '-30 days')"
+    elif period == 'year':
+        base_query += " AND o.created_at >= date('now', '-365 days')"
+    top = db.execute(base_query + " GROUP BY p.id ORDER BY total_sold DESC LIMIT 3", params).fetchall()
+    bottom = db.execute(base_query + " GROUP BY p.id ORDER BY total_sold ASC LIMIT 3", params).fetchall()
+    return jsonify({
+        'top': [{'id': r['id'], 'name': r['name'], 'sku': r['sku'], 'total_sold': r['total_sold'], 'total_revenue': r['total_revenue']} for r in top],
+        'bottom': [{'id': r['id'], 'name': r['name'], 'sku': r['sku'], 'total_sold': r['total_sold'], 'total_revenue': r['total_revenue']} for r in bottom]
+    })
 
 if __name__ == '__main__':
     init_db()

@@ -68,7 +68,45 @@ def init_db():
             FOREIGN KEY (order_id) REFERENCES orders(id),
             FOREIGN KEY (product_id) REFERENCES products(id)
         );
+
+        CREATE TABLE IF NOT EXISTS restock_batches (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            total_cost REAL NOT NULL DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS restock_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            batch_id INTEGER NOT NULL,
+            product_id INTEGER NOT NULL,
+            qty_added INTEGER NOT NULL,
+            allocated_cost REAL NOT NULL DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (batch_id) REFERENCES restock_batches(id),
+            FOREIGN KEY (product_id) REFERENCES products(id)
+        );
     ''')
+
+    # Migrate: add new tables if not exists
+    c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='restock_batches'")
+    if not c.fetchone():
+        c.execute('''CREATE TABLE restock_batches (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            total_cost REAL NOT NULL DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )''')
+    c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='restock_items'")
+    if not c.fetchone():
+        c.execute('''CREATE TABLE restock_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            batch_id INTEGER NOT NULL,
+            product_id INTEGER NOT NULL,
+            qty_added INTEGER NOT NULL,
+            allocated_cost REAL NOT NULL DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (batch_id) REFERENCES restock_batches(id),
+            FOREIGN KEY (product_id) REFERENCES products(id)
+        )''')
 
     # Seed default user
     c.execute("SELECT COUNT(*) FROM users")

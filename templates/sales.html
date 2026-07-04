@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}Sales Dashboard{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h2>Sales Dashboard</h2>
+</div>
+
+<div class="period-selector">
+    <button class="btn btn-period active" data-period="today">Today</button>
+    <button class="btn btn-period" data-period="week">This Week</button>
+    <button class="btn btn-period" data-period="month">This Month</button>
+    <button class="btn btn-period" data-period="year">This Year</button>
+    <button class="btn btn-period" data-period="all">All Time</button>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-icon">&#128176;</div>
+        <div class="stat-info">
+            <div class="stat-value" id="stat-revenue">Rp 0</div>
+            <div class="stat-label">Total Revenue</div>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">&#128722;</div>
+        <div class="stat-info">
+            <div class="stat-value" id="stat-orders">0</div>
+            <div class="stat-label">Completed Orders</div>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">&#128230;</div>
+        <div class="stat-info">
+            <div class="stat-value" id="stat-skus">0</div>
+            <div class="stat-label">Unique SKUs Sold</div>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">&#128063;</div>
+        <div class="stat-info">
+            <div class="stat-value" id="stat-items">0</div>
+            <div class="stat-label">Total Items Sold</div>
+        </div>
+    </div>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-icon">&#128203;</div>
+        <div class="stat-info">
+            <div class="stat-value" id="stat-restock-cost">Rp 0</div>
+            <div class="stat-label">Restock Cost</div>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">&#128176;</div>
+        <div class="stat-info">
+            <div class="stat-value" id="stat-net-profit">Rp 0</div>
+            <div class="stat-label">Net Profit</div>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">&#127970;</div>
+        <div class="stat-info">
+            <div class="stat-value" id="stat-product-value">Rp 0</div>
+            <div class="stat-label">Total Product Value</div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <h3>Sales Trend</h3>
+    <div class="chart-container">
+        <canvas id="trendChart"></canvas>
+    </div>
+</div>
+
+<div class="grid-2">
+    <div class="card">
+        <h3>Top 3 Sellers</h3>
+        <table class="data-table">
+            <thead>
+                <tr><th>Product</th><th>SKU</th><th>Qty Sold</th><th>Revenue</th></tr>
+            </thead>
+            <tbody id="top-sellers-body">
+                <tr><td colspan="4" class="empty-row">No data yet</td></tr>
+            </tbody>
+        </table>
+    </div>
+    <div class="card">
+        <h3>Bottom 3 Sellers</h3>
+        <table class="data-table">
+            <thead>
+                <tr><th>Product</th><th>SKU</th><th>Qty Sold</th><th>Revenue</th></tr>
+            </thead>
+            <tbody id="bottom-sellers-body">
+                <tr><td colspan="4" class="empty-row">No data yet</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+{% endblock %}

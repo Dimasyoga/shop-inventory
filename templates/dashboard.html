@@ -30,8 +30,32 @@
     <div class="stat-card">
         <div class="stat-icon">💰</div>
         <div class="stat-info">
-            <div class="stat-value">{{ today_revenue }}</div>
-            <div class="stat-label">Today's Revenue</div>
+            <div class="stat-value">{{ month_revenue }}</div>
+            <div class="stat-label">This Month's Revenue</div>
+        </div>
+    </div>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-icon">📊</div>
+        <div class="stat-info">
+            <div class="stat-value">{{ net_profit }}</div>
+            <div class="stat-label">Net Profit (This Month)</div>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">🏪</div>
+        <div class="stat-info">
+            <div class="stat-value">{{ total_product_value }}</div>
+            <div class="stat-label">Total Product Value</div>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">📥</div>
+        <div class="stat-info">
+            <div class="stat-value">{{ format_rupiah(total_restock_cost_raw) }}</div>
+            <div class="stat-label">Restock Cost (This Month)</div>
         </div>
     </div>
 </div>
@@ -47,7 +71,7 @@
                 {% for order in recent_orders %}
                 <tr>
                     <td>Order #{{ order['id'] }}</td>
-                    <td><span class="badge badge-{{ order['status'] }}">{{ order['status'] }}</span></td>
+                    <td><span class="badge badge-{{ order['status'] }}">{{ 'Payment Confirmed' if order['status'] == 'confirmed' else order['status'] }}</span></td>
                     <td>{{ format_rupiah(order['total_amount']) }}</td>
                     <td>{{ order['created_at'] }}</td>
                 </tr>

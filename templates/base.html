@@ -17,6 +17,8 @@
             <li><a href="{{ url_for('products_page') }}" class="{% if request.endpoint == 'products_page' %}active{% endif %}">📦 Products</a></li>
             <li><a href="{{ url_for('categories_page') }}" class="{% if request.endpoint == 'categories_page' %}active{% endif %}">🏷️ Categories</a></li>
             <li><a href="{{ url_for('orders_page') }}" class="{% if request.endpoint == 'orders_page' %}active{% endif %}">🛒 Orders</a></li>
+            <li><a href="{{ url_for('restock_page') }}" class="{% if request.endpoint == 'restock_page' %}active{% endif %}">📥 Restock</a></li>
+            <li><a href="{{ url_for('sales_page') }}" class="{% if request.endpoint == 'sales_page' %}active{% endif %}">📈 Sales</a></li>
         </ul>
         <div class="sidebar-footer">
             <span>👤 {{ session.get('username', '') }}</span>

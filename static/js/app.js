@@ -92,6 +92,7 @@ function openProductModal(id = null) {
     document.getElementById('productForm').reset();
     document.getElementById('productId').value = '';
     document.getElementById('modalTitle').textContent = 'Add Product';
+    document.getElementById('stockWarning').style.display = 'none';
     if (id) {
         fetch('/api/products').then(r => r.json()).then(products => {
             const p = products.find(x => x.id === id);
@@ -112,6 +113,16 @@ function openProductModal(id = null) {
 function closeProductModal() { document.getElementById('productModal').classList.remove('active'); }
 
 function editProduct(id) { openProductModal(id); }
+
+function onStockChange() {
+    const pid = document.getElementById('productId').value;
+    const warning = document.getElementById('stockWarning');
+    if (pid) {
+        warning.style.display = 'block';
+    } else {
+        warning.style.display = 'none';
+    }
+}
 
 function saveProduct(e) {
     e.preventDefault();
@@ -192,7 +203,7 @@ function loadOrders() {
                 <td>${o.created_at}</td>
                 <td>${o.items ? o.items.length : 0} items</td>
                 <td>${formatRupiah(o.total_amount)}</td>
-                <td><span class="badge badge-${o.status}">${o.status}</span></td>
+                <td><span class="badge badge-${o.status}">${o.status === 'confirmed' ? 'Payment Confirmed' : o.status}</span></td>
                 <td class="action-cell">
                     <button class="btn-icon" onclick="viewOrder(${o.id})" title="View">👁️</button>
                     ${o.status === 'draft' ? `<button class="btn-icon" onclick="confirmOrder(${o.id})" title="Confirm">✅</button>` : ''}
@@ -277,17 +288,17 @@ function createOrder() {
 }
 
 function confirmOrder(id) {
-    if (!confirm('Confirm this order? Stock will be deducted.')) return;
+    if (!confirm('Confirm payment for this order?')) return;
     api('/api/orders/' + id + '/confirm', 'POST').then(d => {
         if (d.success) {
-            showToast('Order confirmed');
+            showToast('Payment confirmed');
             loadOrders();
         } else showToast(d.error, 'error');
     });
 }
 
 function completeOrder(id) {
-    if (!confirm('Mark order as completed?')) return;
+    if (!confirm('Complete this order? Stock will be deducted.')) return;
     api('/api/orders/' + id + '/complete', 'POST').then(d => {
         if (d.success) {
             showToast('Order completed');
@@ -297,7 +308,7 @@ function completeOrder(id) {
 }
 
 function cancelOrder(id) {
-    if (!confirm('Cancel this order? Stock will be restored.')) return;
+    if (!confirm('Cancel this order?')) return;
     api('/api/orders/' + id + '/cancel', 'POST').then(d => {
         if (d.success) {
             showToast('Order cancelled');
@@ -312,7 +323,7 @@ function viewOrder(id) {
         if (!o) return;
         document.getElementById('detailOrderId').textContent = `Order #${o.id}`;
         let html = `
-            <p><strong>Status:</strong> <span class="badge badge-${o.status}">${o.status}</span></p>
+            <p><strong>Status:</strong> <span class="badge badge-${o.status}">${o.status === 'confirmed' ? 'Payment Confirmed' : o.status}</span></p>
             <p><strong>Date:</strong> ${o.created_at}</p>
             <table class="data-table" style="margin:12px 0">
                 <thead><tr><th>Product</th><th>Qty</th><th>Price</th><th>Subtotal</th></tr></thead>
@@ -335,8 +346,207 @@ function viewOrder(id) {
 }
 function closeOrderDetail() { document.getElementById('orderDetailModal').classList.remove('active'); }
 
+/* ===== Sales Dashboard ===== */
+let currentPeriod = 'today';
+let trendChartInstance = null;
+
+function loadSalesData() {
+    loadSalesSummary();
+    loadSalesTrend();
+    loadTopProducts();
+}
+
+function loadSalesSummary() {
+    fetch('/api/sales/summary?period=' + currentPeriod)
+        .then(r => r.json())
+        .then(d => {
+            document.getElementById('stat-revenue').textContent = formatRupiah(d.total_revenue);
+            document.getElementById('stat-orders').textContent = d.total_orders;
+            document.getElementById('stat-skus').textContent = d.unique_skus;
+            document.getElementById('stat-items').textContent = d.total_items_sold;
+            document.getElementById('stat-restock-cost').textContent = formatRupiah(d.restock_cost);
+            document.getElementById('stat-net-profit').textContent = formatRupiah(d.net_profit);
+        });
+    fetch('/api/sales/product-value')
+        .then(r => r.json())
+        .then(d => {
+            document.getElementById('stat-product-value').textContent = formatRupiah(d.total_value);
+        });
+}
+
+function loadSalesTrend() {
+    fetch('/api/sales/trend?period=' + currentPeriod)
+        .then(r => r.json())
+        .then(d => {
+            const ctx = document.getElementById('trendChart');
+            if (!ctx) return;
+            if (trendChartInstance) trendChartInstance.destroy();
+            trendChartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: d.map(p => p.date),
+                    datasets: [{
+                        label: 'Revenue',
+                        data: d.map(p => p.revenue),
+                        borderColor: '#4361ee',
+                        backgroundColor: 'rgba(67,97,238,0.1)',
+                        fill: true,
+                        tension: 0.3
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: ctx => 'Revenue: ' + formatRupiah(ctx.raw)
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: v => 'Rp ' + v.toLocaleString('id-ID')
+                            }
+                        }
+                    }
+                }
+            });
+        });
+}
+
+function loadTopProducts() {
+    fetch('/api/sales/top-products?period=' + currentPeriod)
+        .then(r => r.json())
+        .then(d => {
+            const topBody = document.getElementById('top-sellers-body');
+            const bottomBody = document.getElementById('bottom-sellers-body');
+            if (d.top.length) {
+                topBody.innerHTML = d.top.map(p => `
+                    <tr>
+                        <td>${p.name}</td>
+                        <td>${p.sku || '-'}</td>
+                        <td>${p.total_sold}</td>
+                        <td>${formatRupiah(p.total_revenue)}</td>
+                    </tr>
+                `).join('');
+            } else {
+                topBody.innerHTML = '<tr><td colspan="4" class="empty-row">No data yet</td></tr>';
+            }
+            if (d.bottom.length) {
+                bottomBody.innerHTML = d.bottom.map(p => `
+                    <tr>
+                        <td>${p.name}</td>
+                        <td>${p.sku || '-'}</td>
+                        <td>${p.total_sold}</td>
+                        <td>${formatRupiah(p.total_revenue)}</td>
+                    </tr>
+                `).join('');
+            } else {
+                bottomBody.innerHTML = '<tr><td colspan="4" class="empty-row">No data yet</td></tr>';
+            }
+        });
+}
+
+document.addEventListener('click', e => {
+    if (e.target.classList.contains('btn-period')) {
+        document.querySelectorAll('.btn-period').forEach(b => b.classList.remove('active'));
+        e.target.classList.add('active');
+        if (document.getElementById('trendChart')) {
+            currentPeriod = e.target.dataset.period;
+            loadSalesData();
+        } else if (document.getElementById('restockHistoryBody')) {
+            restockPeriod = e.target.dataset.period;
+            loadRestockHistory();
+        }
+    }
+});
+
+/* ===== Restock ===== */
+function addRestockItem() {
+    const idx = document.getElementById('restockItems').children.length;
+    const div = document.createElement('div');
+    div.className = 'restock-item-row';
+    div.innerHTML = `
+        <div class="form-group">
+            <select id="restock-product-${idx}">
+                <option value="">Select product</option>
+                ${PRODUCTS.map(p => `<option value="${p.id}">${p.name} (${p.sku}) - Stock: ${p.stock}</option>`).join('')}
+            </select>
+        </div>
+        <div class="form-group">
+            <input type="number" id="restock-qty-${idx}" min="1" value="1" placeholder="Qty">
+        </div>
+        <div class="form-group">
+            <button class="btn-remove-item" onclick="this.closest('.restock-item-row').remove();">&times;</button>
+        </div>
+    `;
+    document.getElementById('restockItems').appendChild(div);
+}
+
+function submitRestock() {
+    const rows = document.querySelectorAll('.restock-item-row');
+    const items = [];
+    rows.forEach(row => {
+        const select = row.querySelector('select');
+        const inputs = row.querySelectorAll('input');
+        const pid = parseInt(select.value);
+        const qty = parseInt(inputs[0].value) || 0;
+        if (pid && qty > 0) {
+            items.push({ product_id: pid, qty: qty });
+        }
+    });
+    if (!items.length) return showToast('Add at least one product', 'error');
+    const batchCost = parseFloat(document.getElementById('restockTotalCostInput').value) || 0;
+    api('/api/restock', 'POST', { items, total_cost: batchCost }).then(d => {
+        if (d.success) {
+            showToast(`Restock saved! Total cost: ${formatRupiah(d.total_cost)}`);
+            document.getElementById('restockItems').innerHTML = '';
+            document.getElementById('restockTotalCostInput').value = '0';
+            addRestockItem();
+            loadRestockHistory();
+        } else showToast(d.error, 'error');
+    });
+}
+
+function loadRestockHistory() {
+    fetch('/api/restock/history?period=' + restockPeriod)
+        .then(r => r.json())
+        .then(d => {
+            const tbody = document.getElementById('restockHistoryBody');
+            if (!d.length) {
+                tbody.innerHTML = '<tr><td colspan="4" class="empty-row">No restock history yet</td></tr>';
+                return;
+            }
+            tbody.innerHTML = d.map(b => {
+                const productList = b.items.map(i => `${i.product_name} (${i.product_sku || '-'}): +${i.qty_added}`).join('<br>');
+                return `
+                    <tr class="restock-batch-row" onclick="this.querySelector('.restock-detail-row').style.display = this.querySelector('.restock-detail-row').style.display === 'none' ? '' : 'none'">
+                        <td>Batch #${b.id}</td>
+                        <td>${b.items.length} product${b.items.length > 1 ? 's' : ''}</td>
+                        <td>${formatRupiah(b.total_cost)}</td>
+                        <td>${b.created_at}</td>
+                    </tr>
+                    <tr class="restock-detail-row" style="display:none">
+                        <td colspan="4" style="background:#f8f9ff;padding:12px 16px;font-size:13px;color:#555">
+                            ${productList}
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        });
+}
+
 /* ===== Init ===== */
 document.addEventListener('DOMContentLoaded', () => {
     if (document.getElementById('productsBody')) loadProducts();
     if (document.getElementById('ordersBody')) loadOrders();
+    if (document.getElementById('trendChart')) loadSalesData();
+    if (document.getElementById('restockItems')) {
+        addRestockItem();
+        loadRestockHistory();
+    }
 });
