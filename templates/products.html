@@ -18,7 +18,7 @@
     </div>
     <table class="data-table" id="productsTable">
         <thead>
-            <tr><th>SKU</th><th>Name</th><th>Category</th><th>Price</th><th>Stock</th><th>Actions</th></tr>
+            <tr><th>SKU</th><th>Name</th><th>Category</th><th>Sale Price</th><th>Stock</th><th>Actions</th></tr>
         </thead>
         <tbody id="productsBody">
         </tbody>
@@ -69,32 +69,6 @@
             <div class="modal-actions">
                 <button type="button" class="btn btn-secondary" onclick="closeProductModal()">Cancel</button>
                 <button type="submit" class="btn btn-primary">Save</button>
-            </div>
-        </form>
-    </div>
-</div>
-
-<!-- Stock Adjustment Modal -->
-<div class="modal" id="stockModal">
-    <div class="modal-content" style="max-width: 400px">
-        <div class="modal-header">
-            <h3>Adjust Stock</h3>
-            <span class="modal-close" onclick="closeStockModal()">&times;</span>
-        </div>
-        <form onsubmit="adjustStock(event)">
-            <input type="hidden" id="stockProductId">
-            <p id="stockProductName" style="margin-bottom:16px;font-weight:600"></p>
-            <div class="form-group">
-                <label>Quantity Change (+in / -out)</label>
-                <input type="number" id="stockChangeQty" required>
-            </div>
-            <div class="form-group">
-                <label>Reason</label>
-                <input type="text" id="stockReason" placeholder="e.g. Restock, Damage">
-            </div>
-            <div class="modal-actions">
-                <button type="button" class="btn btn-secondary" onclick="closeStockModal()">Cancel</button>
-                <button type="submit" class="btn btn-primary">Apply</button>
             </div>
         </form>
     </div>

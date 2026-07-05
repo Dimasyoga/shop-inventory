@@ -48,7 +48,7 @@
         <div class="stat-icon">🏪</div>
         <div class="stat-info">
             <div class="stat-value">{{ total_product_value }}</div>
-            <div class="stat-label">Total Product Value</div>
+            <div class="stat-label">Total Product Sale Value</div>
         </div>
     </div>
     <div class="stat-card">
@@ -73,7 +73,7 @@
                     <td>Order #{{ order['id'] }}</td>
                     <td><span class="badge badge-{{ order['status'] }}">{{ 'Payment Confirmed' if order['status'] == 'confirmed' else order['status'] }}</span></td>
                     <td>{{ format_rupiah(order['total_amount']) }}</td>
-                    <td>{{ order['created_at'] }}</td>
+                    <td>{{ order['created_at'] | format_datetime }}</td>
                 </tr>
                 {% else %}
                 <tr><td colspan="4" class="empty-row">No orders yet</td></tr>

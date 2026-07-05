@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify, render_template, redirect, url_for, session, g
 from database import get_db, init_db
 from functools import wraps
+from datetime import datetime, timezone
 import math
 
 app = Flask(__name__)
@@ -20,6 +21,11 @@ def format_rupiah(amount):
     amount = abs(int(round(amount)))
     formatted = f'{amount:,}'.replace(',', '.')
     return f'{sign}Rp {formatted}'
+
+@app.template_filter('format_datetime')
+def format_datetime(utc_str):
+    dt = datetime.fromisoformat(utc_str).replace(tzinfo=timezone.utc)
+    return dt.astimezone().strftime('%Y-%m-%d %H:%M:%S')
 
 @app.before_request
 def before_request():

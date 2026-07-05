@@ -80,7 +80,6 @@ function loadProducts() {
                 <td>${p.stock_qty}</td>
                 <td class="action-cell">
                     <button class="btn-icon" onclick="editProduct(${p.id})" title="Edit">✏️</button>
-                    <button class="btn-icon" onclick="openStockModal(${p.id}, '${p.name}')" title="Stock">📊</button>
                     <button class="btn-icon" onclick="deleteProduct(${p.id})" title="Archive">🗑️</button>
                 </td>
             </tr>
@@ -156,33 +155,11 @@ function deleteProduct(id) {
     });
 }
 
-/* ===== Stock Adjustment ===== */
-function openStockModal(id, name) {
-    document.getElementById('stockProductId').value = id;
-    document.getElementById('stockProductName').textContent = name;
-    document.getElementById('stockChangeQty').value = '';
-    document.getElementById('stockReason').value = '';
-    document.getElementById('stockModal').classList.add('active');
-}
-function closeStockModal() { document.getElementById('stockModal').classList.remove('active'); }
-
-function adjustStock(e) {
-    e.preventDefault();
-    const data = {
-        product_id: document.getElementById('stockProductId').value,
-        change_qty: parseInt(document.getElementById('stockChangeQty').value),
-        reason: document.getElementById('stockReason').value
-    };
-    api('/api/stock/adjust', 'POST', data).then(d => {
-        if (d.success) {
-            showToast(`Stock updated. New qty: ${d.new_qty}`);
-            closeStockModal();
-            loadProducts();
-        } else showToast(d.error, 'error');
-    });
-}
-
 /* ===== Orders ===== */
+function formatLocalDate(utcStr) {
+    return new Date(utcStr.replace(' ', 'T') + 'Z').toLocaleString();
+}
+
 let orderItems = [];
 
 function loadOrders() {
@@ -199,8 +176,8 @@ function loadOrders() {
         }
         tbody.innerHTML = orders.map(o => `
             <tr>
-                <td>Order #${o.id}</td>
-                <td>${o.created_at}</td>
+                <td>${o.id}</td>
+                <td>${formatLocalDate(o.created_at)}</td>
                 <td>${o.items ? o.items.length : 0} items</td>
                 <td>${formatRupiah(o.total_amount)}</td>
                 <td><span class="badge badge-${o.status}">${o.status === 'confirmed' ? 'Payment Confirmed' : o.status}</span></td>
@@ -280,7 +257,7 @@ function createOrder() {
     if (!items.length) return showToast('Add at least one item', 'error');
     api('/api/orders', 'POST', { items }).then(d => {
         if (d.success) {
-            showToast(`Order #${d.order_id} created`);
+            showToast(`Order ID ${d.order_id} created`);
             closeOrderModal();
             loadOrders();
         } else showToast(d.error, 'error');
@@ -321,10 +298,10 @@ function viewOrder(id) {
     fetch('/api/orders?').then(r => r.json()).then(orders => {
         const o = orders.find(x => x.id === id);
         if (!o) return;
-        document.getElementById('detailOrderId').textContent = `Order #${o.id}`;
+        document.getElementById('detailOrderId').textContent = `Order ID ${o.id}`;
         let html = `
             <p><strong>Status:</strong> <span class="badge badge-${o.status}">${o.status === 'confirmed' ? 'Payment Confirmed' : o.status}</span></p>
-            <p><strong>Date:</strong> ${o.created_at}</p>
+            <p><strong>Date:</strong> ${formatLocalDate(o.created_at)}</p>
             <table class="data-table" style="margin:12px 0">
                 <thead><tr><th>Product</th><th>Qty</th><th>Price</th><th>Subtotal</th></tr></thead>
                 <tbody>
@@ -347,7 +324,7 @@ function viewOrder(id) {
 function closeOrderDetail() { document.getElementById('orderDetailModal').classList.remove('active'); }
 
 /* ===== Sales Dashboard ===== */
-let currentPeriod = 'today';
+let currentPeriod = 'month';
 let trendChartInstance = null;
 
 function loadSalesData() {
@@ -528,7 +505,7 @@ function loadRestockHistory() {
                         <td>Batch #${b.id}</td>
                         <td>${b.items.length} product${b.items.length > 1 ? 's' : ''}</td>
                         <td>${formatRupiah(b.total_cost)}</td>
-                        <td>${b.created_at}</td>
+                        <td>${formatLocalDate(b.created_at)}</td>
                     </tr>
                     <tr class="restock-detail-row" style="display:none">
                         <td colspan="4" style="background:#f8f9ff;padding:12px 16px;font-size:13px;color:#555">
