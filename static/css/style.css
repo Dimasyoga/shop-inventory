@@ -168,6 +168,42 @@ select { padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-siz
 .btn-period:hover { border-color: #4361ee; color: #4361ee; }
 .btn-period.active { background: #4361ee; color: white; border-color: #4361ee; }
 
+/* Time Navigator */
+.time-navigator {
+    display: flex; align-items: center; gap: 16px; margin-bottom: 24px; flex-wrap: wrap;
+}
+.time-unit-selector {
+    display: flex; gap: 6px;
+}
+.btn-unit {
+    padding: 8px 16px; border: 1px solid #ddd; border-radius: 6px;
+    background: white; color: #555; font-size: 14px; cursor: pointer;
+    transition: all 0.2s;
+}
+.btn-unit:hover { border-color: #4361ee; color: #4361ee; }
+.btn-unit.active { background: #4361ee; color: white; border-color: #4361ee; }
+
+.time-controls {
+    display: flex; align-items: center; gap: 8px;
+}
+.btn-nav {
+    width: 32px; height: 32px; border: 1px solid #ddd; border-radius: 6px;
+    background: white; color: #555; font-size: 14px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.2s;
+}
+.btn-nav:hover { border-color: #4361ee; color: #4361ee; }
+.time-label {
+    font-size: 14px; color: #333; min-width: 160px; text-align: center;
+    font-weight: 500;
+}
+.btn-reset {
+    padding: 6px 14px; border: 1px solid #ddd; border-radius: 6px;
+    background: white; color: #888; font-size: 13px; cursor: pointer;
+    transition: all 0.2s;
+}
+.btn-reset:hover { border-color: #4361ee; color: #4361ee; }
+
 /* Chart Container */
 .chart-container {
     position: relative; height: 300px; width: 100%;
@@ -220,5 +256,7 @@ select { padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-siz
     .grid-2 { grid-template-columns: 1fr; }
     .form-row { grid-template-columns: 1fr; }
     .period-selector { flex-wrap: wrap; }
+    .time-navigator { flex-direction: column; align-items: flex-start; }
+    .time-controls { width: 100%; justify-content: space-between; }
     .chart-container { height: 220px; }
 }

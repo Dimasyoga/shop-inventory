@@ -463,11 +463,51 @@ def api_restock_history():
 def sales_page():
     return render_template('sales.html', format_rupiah=format_rupiah)
 
+def get_date_range(unit, offset=0):
+    """Return (start_date, end_date) as 'YYYY-MM-DD' strings for the given unit and offset."""
+    now = datetime.now()
+    if unit == 'day':
+        d = now - __import__('datetime').timedelta(days=offset)
+        ds = d.strftime('%Y-%m-%d')
+        return ds, ds
+    elif unit == 'week':
+        dow = now.weekday()  # Mon=0 ... Sun=6
+        today = now.date()
+        monday = today - __import__('datetime').timedelta(days=dow + offset * 7)
+        sunday = monday + __import__('datetime').timedelta(days=6)
+        return monday.isoformat(), sunday.isoformat()
+    elif unit == 'month':
+        month = now.month - offset
+        year = now.year
+        while month <= 0:
+            month += 12
+            year -= 1
+        first = f"{year}-{month:02d}-01"
+        if month == 12:
+            last = f"{year + 1}-01-01"
+        else:
+            last = f"{year}-{month + 1:02d}-01"
+        return first, last
+    elif unit == 'year':
+        y = now.year - offset
+        return f"{y}-01-01", f"{y}-12-31"
+    return None, None
+
+def build_date_filter(start_date, end_date):
+    """Return SQL WHERE clause fragment + params for a date range."""
+    return " AND o.created_at >= ? AND o.created_at < date(?)", (start_date, end_date)
+
 @app.route('/api/sales/summary', methods=['GET'])
 @login_required
 def api_sales_summary():
-    period = request.args.get('period', 'all')
+    unit = request.args.get('unit', 'month')
+    offset = int(request.args.get('offset', 0))
+    start_date, end_date = get_date_range(unit, offset)
+    if not start_date:
+        return jsonify({'error': 'invalid unit'}), 400
+
     db = g.db
+    date_filter, params = build_date_filter(start_date, end_date)
     query = """
         SELECT
             COALESCE(SUM(o.total_amount), 0) as total_revenue,
@@ -477,27 +517,18 @@ def api_sales_summary():
         FROM orders o
         JOIN order_items oi ON o.id = oi.order_id
         WHERE o.status = 'completed'
-    """
-    params = []
-    if period == 'today':
-        query += " AND date(o.created_at) = date('now')"
-    elif period == 'week':
-        query += " AND o.created_at >= date('now', '-7 days')"
-    elif period == 'month':
-        query += " AND o.created_at >= date('now', '-30 days')"
-    elif period == 'year':
-        query += " AND o.created_at >= date('now', '-365 days')"
+    """ + date_filter
     row = db.execute(query, params).fetchone()
-    restock_query = "SELECT COALESCE(SUM(total_cost), 0) as total FROM restock_batches"
-    if period == 'today':
-        restock_query += " WHERE date(created_at) = date('now')"
-    elif period == 'week':
-        restock_query += " WHERE created_at >= date('now', '-7 days')"
-    elif period == 'month':
-        restock_query += " WHERE created_at >= date('now', '-30 days')"
-    elif period == 'year':
-        restock_query += " WHERE created_at >= date('now', '-365 days')"
-    restock_cost = db.execute(restock_query).fetchone()['total']
+
+    restock_date_filter, restock_params = (
+        " AND created_at >= ? AND created_at < date(?)",
+        (start_date, end_date)
+    )
+    restock_cost = db.execute(
+        "SELECT COALESCE(SUM(total_cost), 0) as total FROM restock_batches WHERE created_at >= ? AND created_at < date(?)"
+        , restock_params
+    ).fetchone()['total']
+
     return jsonify({
         'total_revenue': row['total_revenue'],
         'total_orders': row['total_orders'],
@@ -519,47 +550,71 @@ def api_sales_product_value():
 @app.route('/api/sales/trend', methods=['GET'])
 @login_required
 def api_sales_trend():
-    period = request.args.get('period', 'all')
+    unit = request.args.get('unit', 'month')
+    offset = int(request.args.get('offset', 0))
+    start_date, end_date = get_date_range(unit, offset)
+    if not start_date:
+        return jsonify({'error': 'invalid unit'}), 400
+
     db = g.db
-    query = """
-        SELECT date(o.created_at) as sale_date, SUM(o.total_amount) as daily_revenue
-        FROM orders o
-        WHERE o.status = 'completed'
-    """
-    params = []
-    if period == 'today':
-        query += " AND date(o.created_at) = date('now')"
-    elif period == 'week':
-        query += " AND o.created_at >= date('now', '-7 days')"
-    elif period == 'month':
-        query += " AND o.created_at >= date('now', '-30 days')"
-    elif period == 'year':
-        query += " AND o.created_at >= date('now', '-365 days')"
-    query += " GROUP BY date(o.created_at) ORDER BY sale_date ASC"
+    date_filter, params = build_date_filter(start_date, end_date)
+
+    if unit == 'day':
+        query = """
+            SELECT date(o.created_at) as label, SUM(o.total_amount) as revenue
+            FROM orders o WHERE o.status = 'completed'
+        """ + date_filter + """ GROUP BY date(o.created_at) ORDER BY label ASC"""
+    elif unit == 'week':
+        query = """
+            SELECT date(o.created_at) as label, SUM(o.total_amount) as revenue
+            FROM orders o WHERE o.status = 'completed'
+        """ + date_filter + """ GROUP BY date(o.created_at) ORDER BY label ASC"""
+    elif unit == 'month':
+        query = """
+            SELECT (strftime('%W', o.created_at) + 0) as wk,
+                   MIN(date(o.created_at)) as start_d,
+                   SUM(o.total_amount) as revenue
+            FROM orders o WHERE o.status = 'completed'
+        """ + date_filter + """ GROUP BY wk ORDER BY wk ASC"""
+    elif unit == 'year':
+        query = """
+            SELECT strftime('%m', o.created_at) as label,
+                   SUM(o.total_amount) as revenue
+            FROM orders o WHERE o.status = 'completed'
+        """ + date_filter + """ GROUP BY label ORDER BY label ASC"""
     rows = db.execute(query, params).fetchall()
-    return jsonify([{'date': r['sale_date'], 'revenue': r['daily_revenue']} for r in rows])
+
+    if unit == 'month':
+        result = []
+        for r in rows:
+            wk_num = int(r['wk'])
+            result.append({'label': f'Week {wk_num}', 'revenue': r['revenue']})
+        return jsonify(result)
+    elif unit == 'year':
+        month_names = {f"{m:02d}": n for m, n in enumerate(
+            ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'], 1)}
+        return jsonify([{'label': month_names.get(r['label'], r['label']), 'revenue': r['revenue']} for r in rows])
+    else:
+        return jsonify([{'label': r['label'], 'revenue': r['revenue']} for r in rows])
 
 @app.route('/api/sales/top-products', methods=['GET'])
 @login_required
 def api_sales_top_products():
-    period = request.args.get('period', 'all')
+    unit = request.args.get('unit', 'month')
+    offset = int(request.args.get('offset', 0))
+    start_date, end_date = get_date_range(unit, offset)
+    if not start_date:
+        return jsonify({'error': 'invalid unit'}), 400
+
     db = g.db
+    date_filter, params = build_date_filter(start_date, end_date)
     base_query = """
         SELECT p.id, p.name, p.sku, SUM(oi.quantity) as total_sold, SUM(oi.subtotal) as total_revenue
         FROM order_items oi
         JOIN orders o ON oi.order_id = o.id
         JOIN products p ON oi.product_id = p.id
         WHERE o.status = 'completed'
-    """
-    params = []
-    if period == 'today':
-        base_query += " AND date(o.created_at) = date('now')"
-    elif period == 'week':
-        base_query += " AND o.created_at >= date('now', '-7 days')"
-    elif period == 'month':
-        base_query += " AND o.created_at >= date('now', '-30 days')"
-    elif period == 'year':
-        base_query += " AND o.created_at >= date('now', '-365 days')"
+    """ + date_filter
     top = db.execute(base_query + " GROUP BY p.id ORDER BY total_sold DESC LIMIT 3", params).fetchall()
     bottom = db.execute(base_query + " GROUP BY p.id ORDER BY total_sold ASC LIMIT 3", params).fetchall()
     return jsonify({

@@ -6,6 +6,20 @@ cd "$SCRIPT_DIR"
 
 export PATH="/home/phoe/.local/bin:$PATH"
 
+# Create virtual environment if not exists
+if [ ! -d "venv" ]; then
+    echo "Creating virtual environment..."
+    python3 -m venv venv --without-pip
+    echo "Bootstrapping pip..."
+    curl -sS https://bootstrap.pypa.io/get-pip.py | venv/bin/python3
+    echo ""
+fi
+
+# Install dependencies
+echo "Installing dependencies..."
+venv/bin/python3 -m pip install -r requirements.txt
+echo ""
+
 echo "================================="
 echo "  Shop Inventory Management System"
 echo "================================="
@@ -18,4 +32,4 @@ echo "Default login: admin / admin123"
 echo "Press Ctrl+C to stop"
 echo ""
 
-python3 app.py
+venv/bin/python3 app.py

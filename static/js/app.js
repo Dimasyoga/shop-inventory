@@ -324,17 +324,23 @@ function viewOrder(id) {
 function closeOrderDetail() { document.getElementById('orderDetailModal').classList.remove('active'); }
 
 /* ===== Sales Dashboard ===== */
-let currentPeriod = 'month';
+let timeUnit = 'month';
+let timeOffset = 0;
 let trendChartInstance = null;
 
+function buildSalesParams() {
+    return `unit=${timeUnit}&offset=${timeOffset}`;
+}
+
 function loadSalesData() {
+    updateTimeLabel();
     loadSalesSummary();
     loadSalesTrend();
     loadTopProducts();
 }
 
 function loadSalesSummary() {
-    fetch('/api/sales/summary?period=' + currentPeriod)
+    fetch('/api/sales/summary?' + buildSalesParams())
         .then(r => r.json())
         .then(d => {
             document.getElementById('stat-revenue').textContent = formatRupiah(d.total_revenue);
@@ -352,7 +358,7 @@ function loadSalesSummary() {
 }
 
 function loadSalesTrend() {
-    fetch('/api/sales/trend?period=' + currentPeriod)
+    fetch('/api/sales/trend?' + buildSalesParams())
         .then(r => r.json())
         .then(d => {
             const ctx = document.getElementById('trendChart');
@@ -361,7 +367,7 @@ function loadSalesTrend() {
             trendChartInstance = new Chart(ctx, {
                 type: 'line',
                 data: {
-                    labels: d.map(p => p.date),
+                    labels: d.map(p => p.label),
                     datasets: [{
                         label: 'Revenue',
                         data: d.map(p => p.revenue),
@@ -396,7 +402,7 @@ function loadSalesTrend() {
 }
 
 function loadTopProducts() {
-    fetch('/api/sales/top-products?period=' + currentPeriod)
+    fetch('/api/sales/top-products?' + buildSalesParams())
         .then(r => r.json())
         .then(d => {
             const topBody = document.getElementById('top-sellers-body');
@@ -428,14 +434,57 @@ function loadTopProducts() {
         });
 }
 
+function updateTimeLabel() {
+    const now = new Date();
+    const labelEl = document.getElementById('timeLabel');
+    if (!labelEl) return;
+
+    if (timeUnit === 'day') {
+        const d = new Date(now);
+        d.setDate(d.getDate() - timeOffset);
+        labelEl.textContent = d.toLocaleDateString('en-US', {month: 'short', day: 'numeric', year: 'numeric'});
+    } else if (timeUnit === 'week') {
+        const dow = now.getDay();
+        const monday = new Date(now);
+        monday.setDate(now.getDate() - ((dow + 6) % 7) - timeOffset * 7);
+        const sunday = new Date(monday);
+        sunday.setDate(monday.getDate() + 6);
+        labelEl.textContent = monday.toLocaleDateString('en-US', {month: 'short', day: 'numeric'}) + ' - ' +
+                              sunday.toLocaleDateString('en-US', {month: 'short', day: 'numeric', year: 'numeric'});
+    } else if (timeUnit === 'month') {
+        const d = new Date(now.getFullYear(), now.getMonth() - timeOffset, 1);
+        const lastDay = new Date(now.getFullYear(), now.getMonth() - timeOffset + 1, 0);
+        labelEl.textContent = d.toLocaleDateString('en-US', {month: 'short', year: 'numeric'}) +
+                              ' (' + d.getDate() + ' - ' + lastDay.getDate() + ')';
+    } else if (timeUnit === 'year') {
+        labelEl.textContent = (now.getFullYear() - timeOffset).toString();
+    }
+}
+
 document.addEventListener('click', e => {
-    if (e.target.classList.contains('btn-period')) {
-        document.querySelectorAll('.btn-period').forEach(b => b.classList.remove('active'));
+    if (e.target.classList.contains('btn-unit')) {
+        document.querySelectorAll('.btn-unit').forEach(b => b.classList.remove('active'));
         e.target.classList.add('active');
         if (document.getElementById('trendChart')) {
-            currentPeriod = e.target.dataset.period;
+            timeUnit = e.target.dataset.unit;
+            timeOffset = 0;
             loadSalesData();
-        } else if (document.getElementById('restockHistoryBody')) {
+        }
+    } else if (e.target.id === 'prevPeriod') {
+        timeOffset++;
+        loadSalesData();
+    } else if (e.target.id === 'nextPeriod') {
+        if (timeOffset > 0) {
+            timeOffset--;
+            loadSalesData();
+        }
+    } else if (e.target.id === 'resetPeriod') {
+        timeOffset = 0;
+        loadSalesData();
+    } else if (e.target.classList.contains('btn-period')) {
+        document.querySelectorAll('.btn-period').forEach(b => b.classList.remove('active'));
+        e.target.classList.add('active');
+        if (document.getElementById('restockHistoryBody')) {
             restockPeriod = e.target.dataset.period;
             loadRestockHistory();
         }

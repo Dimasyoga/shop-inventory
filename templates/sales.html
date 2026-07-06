@@ -5,12 +5,19 @@
     <h2>Sales Dashboard</h2>
 </div>
 
-<div class="period-selector">
-    <button class="btn btn-period" data-period="today">Today</button>
-    <button class="btn btn-period" data-period="week">This Week</button>
-    <button class="btn btn-period active" data-period="month">This Month</button>
-    <button class="btn btn-period" data-period="year">This Year</button>
-    <button class="btn btn-period" data-period="all">All Time</button>
+<div class="time-navigator">
+    <div class="time-unit-selector">
+        <button class="btn btn-unit" data-unit="day">Day</button>
+        <button class="btn btn-unit" data-unit="week">Week</button>
+        <button class="btn btn-unit active" data-unit="month">Month</button>
+        <button class="btn btn-unit" data-unit="year">Year</button>
+    </div>
+    <div class="time-controls">
+        <button class="btn btn-nav" id="prevPeriod">◀</button>
+        <span class="time-label" id="timeLabel"></span>
+        <button class="btn btn-nav" id="nextPeriod">▶</button>
+        <button class="btn btn-reset" id="resetPeriod">Reset</button>
+    </div>
 </div>
 
 <div class="stats-grid">
