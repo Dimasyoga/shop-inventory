@@ -12,6 +12,17 @@ def get_db():
     conn.execute("PRAGMA busy_timeout = 5000")
     return conn
 
+def get_setting(db, key, default=None):
+    row = db.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+    return row['value'] if row else default
+
+def set_setting(db, key, value):
+    """Upsert one setting. Does not commit; the caller owns the transaction."""
+    db.execute("""
+        INSERT INTO settings (key, value) VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    """, (key, value))
+
 def init_db():
     conn = get_db()
     c = conn.cursor()
@@ -69,6 +80,11 @@ def init_db():
             subtotal REAL NOT NULL,
             FOREIGN KEY (order_id) REFERENCES orders(id),
             FOREIGN KEY (product_id) REFERENCES products(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
         );
 
         CREATE TABLE IF NOT EXISTS restock_batches (

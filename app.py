@@ -1,12 +1,16 @@
 from flask import Flask, request, jsonify, render_template, redirect, url_for, session, g
 from database import get_db, init_db
 from functools import wraps
-from datetime import datetime, timedelta, timezone, date, time as dtime
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from werkzeug.security import check_password_hash
 import sqlite3
 import os
 import secrets
+
+import services
+from services import (ServiceError, format_rupiah, get_date_range,
+                      build_date_filter, _to_utc_str)
 
 _SECRET_PATH = os.path.join(os.path.dirname(__file__), '.secret_key')
 
@@ -74,13 +78,6 @@ def _validate_product(data):
         'price': price,
         'reorder_threshold': threshold,
     }, None
-
-def format_rupiah(amount):
-    """Format number as Indonesian Rupiah: Rp 150.000"""
-    sign = '-' if amount < 0 else ''
-    amount = abs(int(round(amount)))
-    formatted = f'{amount:,}'.replace(',', '.')
-    return f'{sign}Rp {formatted}'
 
 @app.template_filter('format_datetime')
 def format_datetime(utc_str):
@@ -407,77 +404,37 @@ def api_create_order():
                 or not isinstance(qty, int) or isinstance(qty, bool) or qty <= 0:
             return jsonify({'error': 'Each item needs a product_id and a positive whole-number quantity'}), 400
 
-    total = 0
-    rows = []
-    for item in items:
-        product = g.db.execute("SELECT * FROM products WHERE id = ?", (item['product_id'],)).fetchone()
-        if not product:
-            return jsonify({'error': f"Product {item['product_id']} not found"}), 404
-        if product['stock_qty'] < item['quantity']:
-            return jsonify({'error': f"Insufficient stock for {product['name']}"}), 400
-        subtotal = product['price'] * item['quantity']
-        total += subtotal
-        rows.append((item['product_id'], item['quantity'], product['price'], subtotal))
-
-    cur = g.db.execute("INSERT INTO orders (status, total_amount) VALUES (?, ?)", ('draft', total))
-    order_id = cur.lastrowid
-    g.db.executemany("""
-        INSERT INTO order_items (order_id, product_id, quantity, unit_price, subtotal)
-        VALUES (?, ?, ?, ?, ?)
-    """, [(order_id, pid, qty, price, subtotal) for pid, qty, price, subtotal in rows])
-
-    g.db.commit()
-    return jsonify({'success': True, 'order_id': order_id, 'total': total})
+    try:
+        result = services.create_order(g.db, items)
+    except ServiceError as e:
+        return jsonify({'error': str(e)}), e.status
+    return jsonify({'success': True, 'order_id': result['order_id'], 'total': result['total']})
 
 @app.route('/api/orders/<int:id>/confirm', methods=['POST'])
 @login_required
 def api_confirm_order(id):
-    order = g.db.execute("SELECT * FROM orders WHERE id = ?", (id,)).fetchone()
-    if not order:
-        return jsonify({'error': 'Order not found'}), 404
-    if order['status'] != 'draft':
-        return jsonify({'error': 'Only draft orders can be confirmed'}), 400
-    g.db.execute("UPDATE orders SET status = 'confirmed', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (id,))
-    g.db.commit()
+    try:
+        services.confirm_order(g.db, id)
+    except ServiceError as e:
+        return jsonify({'error': str(e)}), e.status
     return jsonify({'success': True})
 
 @app.route('/api/orders/<int:id>/complete', methods=['POST'])
 @login_required
 def api_complete_order(id):
-    order = g.db.execute("SELECT * FROM orders WHERE id = ?", (id,)).fetchone()
-    if not order:
-        return jsonify({'error': 'Order not found'}), 404
-    if order['status'] != 'confirmed':
-        return jsonify({'error': 'Only confirmed orders can be completed'}), 400
-    items = g.db.execute("SELECT * FROM order_items WHERE order_id = ?", (id,)).fetchall()
-    for item in items:
-        # Conditional decrement is atomic: no read-modify-write window for concurrent
-        # requests to double-count against.
-        cur = g.db.execute(
-            "UPDATE products SET stock_qty = stock_qty - ?, updated_at = CURRENT_TIMESTAMP"
-            " WHERE id = ? AND stock_qty >= ?",
-            (item['quantity'], item['product_id'], item['quantity']))
-        if cur.rowcount == 0:
-            g.db.rollback()
-            return jsonify({'error': f"Insufficient stock for product #{item['product_id']}"}), 400
-        g.db.execute("INSERT INTO stock_logs (product_id, change_qty, reason) VALUES (?, ?, ?)",
-                     (item['product_id'], -item['quantity'], f'sale order #{id}'))
-    g.db.execute("UPDATE orders SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (id,))
-    g.db.commit()
+    try:
+        services.complete_order(g.db, id)
+    except ServiceError as e:
+        return jsonify({'error': str(e)}), e.status
     return jsonify({'success': True})
 
 @app.route('/api/orders/<int:id>/cancel', methods=['POST'])
 @login_required
 def api_cancel_order(id):
-    order = g.db.execute("SELECT * FROM orders WHERE id = ?", (id,)).fetchone()
-    if not order:
-        return jsonify({'error': 'Order not found'}), 404
-    if order['status'] == 'completed':
-        return jsonify({'error': 'Cannot cancel completed orders'}), 400
-    if order['status'] == 'cancelled':
-        return jsonify({'error': 'Order already cancelled'}), 400
-    g.db.execute("UPDATE orders SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (id,))
-    g.db.commit()
+    try:
+        services.cancel_order(g.db, id)
+    except ServiceError as e:
+        return jsonify({'error': str(e)}), e.status
     return jsonify({'success': True})
 
 # --- Restock ---
@@ -500,33 +457,17 @@ def api_restock():
     if isinstance(batch_total_cost, bool) or not isinstance(batch_total_cost, (int, float)) or not (batch_total_cost >= 0):
         return jsonify({'error': 'Total cost must be 0 or more'}), 400
     batch_total_cost = float(batch_total_cost)
-    total_qty = 0
+    validated = []
     for item in items:
         product_id = item.get('product_id') if isinstance(item, dict) else None
         qty_added = item.get('qty') if isinstance(item, dict) else None
         if not product_id or not isinstance(qty_added, int) or isinstance(qty_added, bool) or qty_added <= 0:
             return jsonify({'error': 'Valid product and positive whole-number quantity required'}), 400
-        product = g.db.execute("SELECT * FROM products WHERE id = ?", (product_id,)).fetchone()
-        if not product:
-            return jsonify({'error': f"Product {product_id} not found"}), 404
-        total_qty += qty_added
-    cur = g.db.execute("INSERT INTO restock_batches (total_cost) VALUES (?)", (batch_total_cost,))
-    batch_id = cur.lastrowid
-    for item in items:
-        product_id = item.get('product_id')
-        qty_added = int(item.get('qty', 0))
-        allocated_cost = (qty_added / total_qty) * batch_total_cost if total_qty > 0 else 0
-        cur = g.db.execute(
-            "UPDATE products SET stock_qty = stock_qty + ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-            (qty_added, product_id))
-        if cur.rowcount == 0:
-            g.db.rollback()
-            return jsonify({'error': f'Product {product_id} not found'}), 404
-        g.db.execute("INSERT INTO restock_items (batch_id, product_id, qty_added, allocated_cost) VALUES (?, ?, ?, ?)",
-                     (batch_id, product_id, qty_added, allocated_cost))
-        g.db.execute("INSERT INTO stock_logs (product_id, change_qty, reason) VALUES (?, ?, ?)",
-                     (product_id, qty_added, f'restock batch #{batch_id}'))
-    g.db.commit()
+        validated.append({'product_id': product_id, 'qty': qty_added})
+    try:
+        services.create_restock(g.db, validated, batch_total_cost)
+    except ServiceError as e:
+        return jsonify({'error': str(e)}), e.status
     return jsonify({'success': True, 'total_cost': batch_total_cost})
 
 @app.route('/api/restock/history', methods=['GET'])
@@ -586,45 +527,6 @@ def _int_arg(name, default=0):
     except (TypeError, ValueError):
         return None
 
-def get_date_range(unit, offset=0, tz=timezone.utc, now=None):
-    """Half-open [start, end) as tz-aware datetimes in tz. (None, None) for an unknown unit."""
-    now = now or datetime.now(tz)
-    today = now.date()
-    if unit == 'day':
-        start = today - timedelta(days=offset)
-        end = start + timedelta(days=1)
-    elif unit == 'week':
-        start = today - timedelta(days=today.weekday() + offset * 7)  # Monday
-        end = start + timedelta(days=7)
-    elif unit == 'month':
-        month, year = now.month - offset, now.year
-        while month <= 0:
-            month += 12
-            year -= 1
-        while month > 12:
-            month -= 12
-            year += 1
-        start = date(year, month, 1)
-        end = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
-    elif unit == 'year':
-        y = now.year - offset
-        start, end = date(y, 1, 1), date(y + 1, 1, 1)
-    else:
-        return None, None
-    return (datetime.combine(start, dtime.min, tzinfo=tz),
-            datetime.combine(end, dtime.min, tzinfo=tz))
-
-def _to_utc_str(dt):
-    """tz-aware datetime -> 'YYYY-MM-DD HH:MM:SS' UTC, matching CURRENT_TIMESTAMP storage."""
-    return dt.astimezone(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
-
-def build_date_filter(start, end, column='o.created_at'):
-    """SQL fragment + params for half-open [start, end).
-
-    `column` is interpolated into the SQL: pass only trusted literals, never request input.
-    """
-    return f" AND {column} >= ? AND {column} < ?", (_to_utc_str(start), _to_utc_str(end))
-
 @app.route('/api/sales/summary', methods=['GET'])
 @login_required
 def api_sales_summary():
@@ -633,38 +535,13 @@ def api_sales_summary():
     if offset is None:
         return jsonify({'error': 'invalid offset'}), 400
     tz = _client_tz(request.args.get('tz'))
-    start, end = get_date_range(unit, offset, tz)
-    if not start:
-        return jsonify({'error': 'invalid unit'}), 400
-
-    db = g.db
-    date_filter, params = build_date_filter(start, end)
-    query = """
-        SELECT
-            COALESCE(SUM(o.total_amount), 0) as total_revenue,
-            COUNT(DISTINCT o.id) as total_orders,
-            COUNT(DISTINCT oi.product_id) as unique_skus,
-            COALESCE(SUM(oi.quantity), 0) as total_items_sold
-        FROM orders o
-        JOIN order_items oi ON o.id = oi.order_id
-        WHERE o.status = 'completed'
-    """ + date_filter
-    row = db.execute(query, params).fetchone()
-
-    restock_filter, restock_params = build_date_filter(start, end, 'created_at')
-    restock_cost = db.execute(
-        "SELECT COALESCE(SUM(total_cost), 0) as total FROM restock_batches WHERE 1=1" + restock_filter,
-        restock_params
-    ).fetchone()['total']
-
-    return jsonify({
-        'total_revenue': row['total_revenue'],
-        'total_orders': row['total_orders'],
-        'unique_skus': row['unique_skus'],
-        'total_items_sold': row['total_items_sold'],
-        'restock_cost': restock_cost,
-        'net_profit': row['total_revenue'] - restock_cost
-    })
+    try:
+        summary = services.sales_summary(g.db, unit, offset, tz)
+    except ServiceError as e:
+        return jsonify({'error': str(e)}), e.status
+    return jsonify({k: summary[k] for k in (
+        'total_revenue', 'total_orders', 'unique_skus',
+        'total_items_sold', 'restock_cost', 'net_profit')})
 
 @app.route('/api/sales/product-value', methods=['GET'])
 @login_required
