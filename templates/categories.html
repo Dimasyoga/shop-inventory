@@ -17,7 +17,7 @@
                 <td>{{ c['name'] }}</td>
                 <td>{{ c['created_at'] | format_datetime }}</td>
                 <td class="action-cell">
-                    <button class="btn-icon" onclick="editCategory({{ c['id'] }}, '{{ c['name'] }}')" title="Edit">✏️</button>
+                    <button class="btn-icon" onclick="editCategory({{ c['id'] }}, {{ c['name'] | tojson }})" title="Edit">✏️</button>
                     <button class="btn-icon" onclick="deleteCategory({{ c['id'] }})" title="Delete">🗑️</button>
                 </td>
             </tr>

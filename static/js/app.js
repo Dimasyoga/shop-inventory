@@ -17,6 +17,14 @@ function showToast(msg, type = 'success') {
 
 const CLIENT_TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
+/* User-entered text (product names, SKUs, ...) must be escaped before being
+   interpolated into innerHTML, or it executes as markup. */
+function escapeHtml(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+}
+
 async function api(url, method = 'GET', body = null) {
     const opts = { method, headers: { 'Content-Type': 'application/json' } };
     if (body) opts.body = JSON.stringify(body);
@@ -91,9 +99,9 @@ function loadProducts() {
         }
         tbody.innerHTML = products.map(p => `
             <tr>
-                <td>${p.sku || '-'}</td>
-                <td>${p.name}</td>
-                <td>${p.category_name || '-'}</td>
+                <td>${escapeHtml(p.sku || '-')}</td>
+                <td>${escapeHtml(p.name)}</td>
+                <td>${escapeHtml(p.category_name || '-')}</td>
                 <td>${formatRupiah(p.price)}</td>
                 <td>${p.stock_qty}</td>
                 <td class="action-cell">
@@ -222,7 +230,7 @@ function addOrderItem() {
         <div class="form-group">
             <select onchange="onProductSelect(this, ${idx})">
                 <option value="">Select product</option>
-                ${PRODUCTS.map(p => `<option value="${p.id}" data-price="${p.price}" data-stock="${p.stock}">${p.name} (Stock: ${p.stock})</option>`).join('')}
+                ${PRODUCTS.map(p => `<option value="${p.id}" data-price="${p.price}" data-stock="${p.stock}">${escapeHtml(p.name)} (Stock: ${p.stock})</option>`).join('')}
             </select>
         </div>
         <div class="form-group">
@@ -320,7 +328,7 @@ function viewOrder(id) {
                 <tbody>
                     ${(o.items || []).map(i => `
                         <tr>
-                            <td>${i.product_name}</td>
+                            <td>${escapeHtml(i.product_name)}</td>
                             <td>${i.quantity}</td>
                             <td>${formatRupiah(i.unit_price)}</td>
                             <td>${formatRupiah(i.subtotal)}</td>
@@ -416,30 +424,17 @@ function loadTopProducts() {
         .then(d => {
             const topBody = document.getElementById('top-sellers-body');
             const bottomBody = document.getElementById('bottom-sellers-body');
-            if (d.top.length) {
-                topBody.innerHTML = d.top.map(p => `
-                    <tr>
-                        <td>${p.name}</td>
-                        <td>${p.sku || '-'}</td>
-                        <td>${p.total_sold}</td>
-                        <td>${formatRupiah(p.total_revenue)}</td>
-                    </tr>
-                `).join('');
-            } else {
-                topBody.innerHTML = '<tr><td colspan="4" class="empty-row">No data yet</td></tr>';
-            }
-            if (d.bottom.length) {
-                bottomBody.innerHTML = d.bottom.map(p => `
-                    <tr>
-                        <td>${p.name}</td>
-                        <td>${p.sku || '-'}</td>
-                        <td>${p.total_sold}</td>
-                        <td>${formatRupiah(p.total_revenue)}</td>
-                    </tr>
-                `).join('');
-            } else {
-                bottomBody.innerHTML = '<tr><td colspan="4" class="empty-row">No data yet</td></tr>';
-            }
+            const sellerRow = p => `
+                <tr>
+                    <td>${escapeHtml(p.name)}</td>
+                    <td>${escapeHtml(p.sku || '-')}</td>
+                    <td>${p.total_sold}</td>
+                    <td>${formatRupiah(p.total_revenue)}</td>
+                </tr>
+            `;
+            const emptyRow = '<tr><td colspan="4" class="empty-row">No data yet</td></tr>';
+            topBody.innerHTML = d.top.length ? d.top.map(sellerRow).join('') : emptyRow;
+            bottomBody.innerHTML = d.bottom.length ? d.bottom.map(sellerRow).join('') : emptyRow;
         });
 }
 
@@ -509,7 +504,7 @@ function addRestockItem() {
         <div class="form-group">
             <select id="restock-product-${idx}">
                 <option value="">Select product</option>
-                ${PRODUCTS.map(p => `<option value="${p.id}">${p.name} (${p.sku}) - Stock: ${p.stock}</option>`).join('')}
+                ${PRODUCTS.map(p => `<option value="${p.id}">${escapeHtml(p.name)} (${escapeHtml(p.sku || '-')}) - Stock: ${p.stock}</option>`).join('')}
             </select>
         </div>
         <div class="form-group">
@@ -556,9 +551,9 @@ function loadRestockHistory() {
                 return;
             }
             tbody.innerHTML = d.map(b => {
-                const productList = b.items.map(i => `${i.product_name} (${i.product_sku || '-'}): +${i.qty_added}`).join('<br>');
+                const productList = b.items.map(i => `${escapeHtml(i.product_name)} (${escapeHtml(i.product_sku || '-')}): +${i.qty_added}`).join('<br>');
                 return `
-                    <tr class="restock-batch-row" onclick="this.querySelector('.restock-detail-row').style.display = this.querySelector('.restock-detail-row').style.display === 'none' ? '' : 'none'">
+                    <tr class="restock-batch-row" onclick="const d = this.nextElementSibling; d.style.display = d.style.display === 'none' ? '' : 'none'">
                         <td>Batch #${b.id}</td>
                         <td>${b.items.length} product${b.items.length > 1 ? 's' : ''}</td>
                         <td>${formatRupiah(b.total_cost)}</td>

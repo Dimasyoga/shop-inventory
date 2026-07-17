@@ -42,11 +42,7 @@
 </div>
 
 <script>
-const PRODUCTS = [
-    {% for p in products %}
-    {id: {{ p['id'] }}, name: "{{ p['name'] }}", sku: "{{ p['sku'] or '-' }}", stock: {{ p['stock_qty'] }}},
-    {% endfor %}
-];
+const PRODUCTS = {{ products_json | tojson }};
 
 let restockPeriod = 'all';
 </script>

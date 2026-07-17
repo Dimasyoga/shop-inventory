@@ -256,6 +256,33 @@ def test_put_product_ignores_stock_qty(client, product):
     assert rows[0]["stock_qty"] == 10
 
 
+# --- Phase 8: XSS ---
+
+XSS_NAME = "</script><img src=x onerror=alert(1)>"
+
+
+def test_product_pages_do_not_embed_raw_script(client, product):
+    """Regression: templates built JS literals from raw names inside <script>."""
+    product(name=XSS_NAME, sku="XSS1", stock=5)
+    for path in ("/orders", "/restock"):
+        html = client.get(path).get_data(as_text=True)
+        assert "</script><img" not in html, f"{path} embeds the raw payload"
+        assert "\\u003c" in html  # tojson escaped it
+
+
+def test_category_edit_button_escapes_name(client):
+    client.post("/api/categories", json={"name": "O'Brien \"quotes\" <tag>"})
+    html = client.get("/categories").get_data(as_text=True)
+    assert "<tag>" not in html
+
+
+def test_api_still_returns_raw_name(client, product):
+    """The API contract is unchanged: escaping happens at render time, not storage."""
+    product(name=XSS_NAME, stock=5)
+    names = [p["name"] for p in client.get("/api/products").get_json()]
+    assert XSS_NAME in names
+
+
 # --- Phase 7: auth hardening ---
 
 def test_login_round_trip(db_path):

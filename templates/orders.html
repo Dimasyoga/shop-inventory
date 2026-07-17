@@ -57,10 +57,6 @@
 </div>
 
 <script>
-const PRODUCTS = [
-    {% for p in products %}
-    {id: {{ p['id'] }}, name: "{{ p['name'] }}", price: {{ p['price'] }}, stock: {{ p['stock_qty'] }}},
-    {% endfor %}
-];
+const PRODUCTS = {{ products_json | tojson }};
 </script>
 {% endblock %}

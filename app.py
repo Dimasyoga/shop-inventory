@@ -42,6 +42,11 @@ def _json_body():
     data = request.get_json(silent=True)
     return data if isinstance(data, dict) else None
 
+def _products_json(rows):
+    """Plain dicts for embedding in templates via |tojson (sqlite3.Row isn't serializable)."""
+    return [{'id': p['id'], 'name': p['name'], 'sku': p['sku'],
+             'price': p['price'], 'stock': p['stock_qty']} for p in rows]
+
 def _validate_product(data):
     """Return (fields, error). fields excludes stock_qty; callers add it where allowed."""
     name = data.get('name')
@@ -357,7 +362,7 @@ def orders_page():
     query += " ORDER BY created_at DESC"
     orders = g.db.execute(query, params).fetchall()
     products = g.db.execute("SELECT * FROM products WHERE is_archived = 0 AND stock_qty > 0 ORDER BY name").fetchall()
-    return render_template('orders.html', orders=orders, products=products, format_rupiah=format_rupiah)
+    return render_template('orders.html', orders=orders, products_json=_products_json(products), format_rupiah=format_rupiah)
 
 @app.route('/api/orders', methods=['GET'])
 @login_required
@@ -480,7 +485,7 @@ def api_cancel_order(id):
 @login_required
 def restock_page():
     products = g.db.execute("SELECT * FROM products WHERE is_archived = 0 AND stock_qty >= 0 ORDER BY name").fetchall()
-    return render_template('restock.html', products=products, format_rupiah=format_rupiah)
+    return render_template('restock.html', products_json=_products_json(products), format_rupiah=format_rupiah)
 
 @app.route('/api/restock', methods=['POST'])
 @login_required
