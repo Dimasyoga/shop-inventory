@@ -736,4 +736,9 @@ if __name__ == '__main__':
     # debug exposes the Werkzeug console (remote code execution) to anyone on the
     # network; it must never default on for a 0.0.0.0 bind.
     debug = os.environ.get('FLASK_DEBUG', '').lower() in ('1', 'true', 'yes')
+    # With the reloader active, only the child process serves requests; the
+    # WERKZEUG_RUN_MAIN guard stops the parent from starting a second poller.
+    if not debug or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
+        from telegram_bot import BotPoller
+        BotPoller().start()
     app.run(host='0.0.0.0', port=5000, debug=debug)
