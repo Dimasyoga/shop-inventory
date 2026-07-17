@@ -36,6 +36,12 @@ def format_datetime(utc_str):
 def before_request():
     g.db = get_db()
 
+@app.teardown_appcontext
+def close_db(exc):
+    db = g.pop('db', None)
+    if db is not None:
+        db.close()
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if 'user_id' in session:
