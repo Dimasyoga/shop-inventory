@@ -12,19 +12,45 @@ A Flask-based shop inventory management system built with Python 3.14, SQLite, a
 - **Currency**: Indonesian Rupiah (Rp)
 
 ### Features
-- User authentication (default: `admin` / `admin123`)
+- User authentication (default: `admin` / `admin123`, hashed at rest; change it in Settings)
 - Product catalog with categories, SKU, pricing, and stock tracking
-- Order management with 3-state lifecycle (draft → confirmed → completed)
+- Order management with lifecycle: draft → confirmed → completed (or cancelled)
 - Batch-level restock system with cost allocation
 - Sales dashboard with period-based analytics and trend charts
-- Stock adjustment with audit logging
+- Stock audit logging on every sale and restock
 - Low stock alerts and reorder thresholds
+- Telegram bot with button-driven menus (see below)
+
+### Telegram Bot
+
+Manage the shop from Telegram: browse products, walk through creating orders and
+restocks, confirm/complete/cancel orders, and check the sales summary — all via
+tap-through inline menus.
+
+Setup:
+1. Create a bot with [@BotFather](https://t.me/BotFather) and copy its token.
+2. In the web UI, open **Settings → Telegram Bot**, paste the token, tick
+   *Enable bot*, and Save (use *Test Connection* to verify the token).
+3. Message your bot on Telegram. It replies "Not authorized" with your numeric
+   Telegram ID — paste that ID into the **whitelist** field in Settings and Save.
+4. Message the bot again: the main menu appears.
+
+Only whitelisted Telegram user IDs can interact with the bot. Settings changes
+apply within one poll cycle (~25 s) — no restart needed. The bot uses long
+polling, so it works on a LAN with no public URL. Bot sales summaries use the
+**shop timezone** configured in Settings (web-page summaries follow the
+browser's timezone).
+
+To enable the Flask debugger during development: `FLASK_DEBUG=1 ./start.sh`
+(never on a network you don't trust — the debugger allows code execution).
 
 ### Project Structure
 ```
 shop-inventory/
-├── app.py              # Flask routes and business logic
-├── database.py         # SQLite schema, migrations, DB connection
+├── app.py              # Flask routes + web-layer validation
+├── services.py         # Business logic shared by web routes and the bot
+├── telegram_bot.py     # Telegram bot: API client, menus, flows, poller
+├── database.py         # SQLite schema, migrations, settings, DB connection
 ├── shop.db             # SQLite database file
 ├── start.sh            # Startup script
 ├── static/
@@ -38,7 +64,8 @@ shop-inventory/
     ├── products.html   # Product catalog with stock management
     ├── orders.html     # Order creation and lifecycle
     ├── restock.html    # Batch restock with cost tracking
-    └── sales.html      # Sales analytics dashboard
+    ├── sales.html      # Sales analytics dashboard
+    └── settings.html   # Telegram bot config + account management
 ```
 
 ---
