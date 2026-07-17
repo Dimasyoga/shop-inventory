@@ -15,11 +15,29 @@ function showToast(msg, type = 'success') {
     setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 300); }, 3000);
 }
 
+const CLIENT_TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
 async function api(url, method = 'GET', body = null) {
     const opts = { method, headers: { 'Content-Type': 'application/json' } };
     if (body) opts.body = JSON.stringify(body);
     const res = await fetch(url, opts);
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `Request failed (${res.status})`);
+    }
     return res.json();
+}
+
+/* Wraps a fetch of JSON that renders into the page, surfacing failures as a toast
+   instead of an unhandled rejection. */
+function fetchJson(url) {
+    return fetch(url).then(res => {
+        if (!res.ok) throw new Error(`Request failed (${res.status})`);
+        return res.json();
+    }).catch(err => {
+        showToast(err.message, 'error');
+        throw err;
+    });
 }
 
 /* ===== Categories ===== */
@@ -329,7 +347,7 @@ let timeOffset = 0;
 let trendChartInstance = null;
 
 function buildSalesParams() {
-    return `unit=${timeUnit}&offset=${timeOffset}`;
+    return `unit=${timeUnit}&offset=${timeOffset}&tz=${encodeURIComponent(CLIENT_TZ)}`;
 }
 
 function loadSalesData() {
@@ -340,8 +358,7 @@ function loadSalesData() {
 }
 
 function loadSalesSummary() {
-    fetch('/api/sales/summary?' + buildSalesParams())
-        .then(r => r.json())
+    fetchJson('/api/sales/summary?' + buildSalesParams())
         .then(d => {
             document.getElementById('stat-revenue').textContent = formatRupiah(d.total_revenue);
             document.getElementById('stat-orders').textContent = d.total_orders;
@@ -350,16 +367,14 @@ function loadSalesSummary() {
             document.getElementById('stat-restock-cost').textContent = formatRupiah(d.restock_cost);
             document.getElementById('stat-net-profit').textContent = formatRupiah(d.net_profit);
         });
-    fetch('/api/sales/product-value')
-        .then(r => r.json())
+    fetchJson('/api/sales/product-value')
         .then(d => {
             document.getElementById('stat-product-value').textContent = formatRupiah(d.total_value);
         });
 }
 
 function loadSalesTrend() {
-    fetch('/api/sales/trend?' + buildSalesParams())
-        .then(r => r.json())
+    fetchJson('/api/sales/trend?' + buildSalesParams())
         .then(d => {
             const ctx = document.getElementById('trendChart');
             if (!ctx) return;
@@ -402,8 +417,7 @@ function loadSalesTrend() {
 }
 
 function loadTopProducts() {
-    fetch('/api/sales/top-products?' + buildSalesParams())
-        .then(r => r.json())
+    fetchJson('/api/sales/top-products?' + buildSalesParams())
         .then(d => {
             const topBody = document.getElementById('top-sellers-body');
             const bottomBody = document.getElementById('bottom-sellers-body');
@@ -539,8 +553,7 @@ function submitRestock() {
 }
 
 function loadRestockHistory() {
-    fetch('/api/restock/history?period=' + restockPeriod)
-        .then(r => r.json())
+    fetchJson(`/api/restock/history?period=${restockPeriod}&tz=${encodeURIComponent(CLIENT_TZ)}`)
         .then(d => {
             const tbody = document.getElementById('restockHistoryBody');
             if (!d.length) {

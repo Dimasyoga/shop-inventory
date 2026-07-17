@@ -1,8 +1,8 @@
 from flask import Flask, request, jsonify, render_template, redirect, url_for, session, g
 from database import get_db, init_db
 from functools import wraps
-from datetime import datetime, timezone
-import math
+from datetime import datetime, timedelta, timezone, date, time as dtime
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 app = Flask(__name__)
 app.secret_key = 'shop-inventory-secret-key-2024'
@@ -425,20 +425,21 @@ def api_restock():
 @login_required
 def api_restock_history():
     period = request.args.get('period', 'all')
+    tz = _client_tz(request.args.get('tz'))
     query = """
         SELECT rb.id, rb.total_cost, rb.created_at
         FROM restock_batches rb
-        ORDER BY rb.created_at DESC
+        WHERE 1=1
     """
-    params = []
-    if period == 'today':
-        query += " WHERE date(rb.created_at) = date('now')"
-    elif period == 'week':
-        query += " WHERE rb.created_at >= date('now', '-7 days')"
-    elif period == 'month':
-        query += " WHERE rb.created_at >= date('now', '-30 days')"
-    elif period == 'year':
-        query += " WHERE rb.created_at >= date('now', '-365 days')"
+    params = ()
+    unit = {'today': 'day', 'week': 'week', 'month': 'month', 'year': 'year'}.get(period)
+    if unit:
+        start, end = get_date_range(unit, 0, tz)
+        clause, params = build_date_filter(start, end, 'rb.created_at')
+        query += clause
+    elif period != 'all':
+        return jsonify({'error': 'invalid period'}), 400
+    query += " ORDER BY rb.created_at DESC"
     batches = g.db.execute(query, params).fetchall()
     result = []
     for b in batches:
@@ -463,51 +464,73 @@ def api_restock_history():
 def sales_page():
     return render_template('sales.html', format_rupiah=format_rupiah)
 
-def get_date_range(unit, offset=0):
-    """Return (start_date, end_date) as 'YYYY-MM-DD' strings for the given unit and offset."""
-    now = datetime.now()
+def _client_tz(name=None):
+    """Resolve an IANA timezone name sent by the client. Falls back to UTC."""
+    try:
+        return ZoneInfo(name) if name else timezone.utc
+    except (ZoneInfoNotFoundError, ValueError):
+        return timezone.utc
+
+def _int_arg(name, default=0):
+    """Read an int query param. Returns None when unparseable so callers can 400."""
+    try:
+        return int(request.args.get(name, default))
+    except (TypeError, ValueError):
+        return None
+
+def get_date_range(unit, offset=0, tz=timezone.utc, now=None):
+    """Half-open [start, end) as tz-aware datetimes in tz. (None, None) for an unknown unit."""
+    now = now or datetime.now(tz)
+    today = now.date()
     if unit == 'day':
-        d = now - __import__('datetime').timedelta(days=offset)
-        ds = d.strftime('%Y-%m-%d')
-        return ds, ds
+        start = today - timedelta(days=offset)
+        end = start + timedelta(days=1)
     elif unit == 'week':
-        dow = now.weekday()  # Mon=0 ... Sun=6
-        today = now.date()
-        monday = today - __import__('datetime').timedelta(days=dow + offset * 7)
-        sunday = monday + __import__('datetime').timedelta(days=6)
-        return monday.isoformat(), sunday.isoformat()
+        start = today - timedelta(days=today.weekday() + offset * 7)  # Monday
+        end = start + timedelta(days=7)
     elif unit == 'month':
-        month = now.month - offset
-        year = now.year
+        month, year = now.month - offset, now.year
         while month <= 0:
             month += 12
             year -= 1
-        first = f"{year}-{month:02d}-01"
-        if month == 12:
-            last = f"{year + 1}-01-01"
-        else:
-            last = f"{year}-{month + 1:02d}-01"
-        return first, last
+        while month > 12:
+            month -= 12
+            year += 1
+        start = date(year, month, 1)
+        end = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
     elif unit == 'year':
         y = now.year - offset
-        return f"{y}-01-01", f"{y}-12-31"
-    return None, None
+        start, end = date(y, 1, 1), date(y + 1, 1, 1)
+    else:
+        return None, None
+    return (datetime.combine(start, dtime.min, tzinfo=tz),
+            datetime.combine(end, dtime.min, tzinfo=tz))
 
-def build_date_filter(start_date, end_date):
-    """Return SQL WHERE clause fragment + params for a date range."""
-    return " AND o.created_at >= ? AND o.created_at < date(?)", (start_date, end_date)
+def _to_utc_str(dt):
+    """tz-aware datetime -> 'YYYY-MM-DD HH:MM:SS' UTC, matching CURRENT_TIMESTAMP storage."""
+    return dt.astimezone(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+
+def build_date_filter(start, end, column='o.created_at'):
+    """SQL fragment + params for half-open [start, end).
+
+    `column` is interpolated into the SQL: pass only trusted literals, never request input.
+    """
+    return f" AND {column} >= ? AND {column} < ?", (_to_utc_str(start), _to_utc_str(end))
 
 @app.route('/api/sales/summary', methods=['GET'])
 @login_required
 def api_sales_summary():
     unit = request.args.get('unit', 'month')
-    offset = int(request.args.get('offset', 0))
-    start_date, end_date = get_date_range(unit, offset)
-    if not start_date:
+    offset = _int_arg('offset')
+    if offset is None:
+        return jsonify({'error': 'invalid offset'}), 400
+    tz = _client_tz(request.args.get('tz'))
+    start, end = get_date_range(unit, offset, tz)
+    if not start:
         return jsonify({'error': 'invalid unit'}), 400
 
     db = g.db
-    date_filter, params = build_date_filter(start_date, end_date)
+    date_filter, params = build_date_filter(start, end)
     query = """
         SELECT
             COALESCE(SUM(o.total_amount), 0) as total_revenue,
@@ -520,13 +543,10 @@ def api_sales_summary():
     """ + date_filter
     row = db.execute(query, params).fetchone()
 
-    restock_date_filter, restock_params = (
-        " AND created_at >= ? AND created_at < date(?)",
-        (start_date, end_date)
-    )
+    restock_filter, restock_params = build_date_filter(start, end, 'created_at')
     restock_cost = db.execute(
-        "SELECT COALESCE(SUM(total_cost), 0) as total FROM restock_batches WHERE created_at >= ? AND created_at < date(?)"
-        , restock_params
+        "SELECT COALESCE(SUM(total_cost), 0) as total FROM restock_batches WHERE 1=1" + restock_filter,
+        restock_params
     ).fetchone()['total']
 
     return jsonify({
@@ -551,63 +571,55 @@ def api_sales_product_value():
 @login_required
 def api_sales_trend():
     unit = request.args.get('unit', 'month')
-    offset = int(request.args.get('offset', 0))
-    start_date, end_date = get_date_range(unit, offset)
-    if not start_date:
+    offset = _int_arg('offset')
+    if offset is None:
+        return jsonify({'error': 'invalid offset'}), 400
+    tz = _client_tz(request.args.get('tz'))
+    start, end = get_date_range(unit, offset, tz)
+    if not start:
         return jsonify({'error': 'invalid unit'}), 400
 
-    db = g.db
-    date_filter, params = build_date_filter(start_date, end_date)
+    date_filter, params = build_date_filter(start, end)
+    rows = g.db.execute("""
+        SELECT o.created_at, o.total_amount
+        FROM orders o WHERE o.status = 'completed'
+    """ + date_filter, params).fetchall()
 
-    if unit == 'day':
-        query = """
-            SELECT date(o.created_at) as label, SUM(o.total_amount) as revenue
-            FROM orders o WHERE o.status = 'completed'
-        """ + date_filter + """ GROUP BY date(o.created_at) ORDER BY label ASC"""
-    elif unit == 'week':
-        query = """
-            SELECT date(o.created_at) as label, SUM(o.total_amount) as revenue
-            FROM orders o WHERE o.status = 'completed'
-        """ + date_filter + """ GROUP BY date(o.created_at) ORDER BY label ASC"""
-    elif unit == 'month':
-        query = """
-            SELECT (strftime('%W', o.created_at) + 0) as wk,
-                   MIN(date(o.created_at)) as start_d,
-                   SUM(o.total_amount) as revenue
-            FROM orders o WHERE o.status = 'completed'
-        """ + date_filter + """ GROUP BY wk ORDER BY wk ASC"""
-    elif unit == 'year':
-        query = """
-            SELECT strftime('%m', o.created_at) as label,
-                   SUM(o.total_amount) as revenue
-            FROM orders o WHERE o.status = 'completed'
-        """ + date_filter + """ GROUP BY label ORDER BY label ASC"""
-    rows = db.execute(query, params).fetchall()
+    # Bucket in Python: SQLite's 'localtime' modifier would use the server's timezone,
+    # and a fixed offset modifier breaks across DST. Both must follow the client's tz.
+    buckets = {}
+    for r in rows:
+        local = datetime.fromisoformat(r['created_at']).replace(tzinfo=timezone.utc).astimezone(tz)
+        if unit in ('day', 'week'):
+            key = local.date().isoformat()
+        elif unit == 'month':
+            key = local.isocalendar().week
+        else:
+            key = local.strftime('%m')
+        buckets[key] = buckets.get(key, 0) + r['total_amount']
 
     if unit == 'month':
-        result = []
-        for r in rows:
-            wk_num = int(r['wk'])
-            result.append({'label': f'Week {wk_num}', 'revenue': r['revenue']})
-        return jsonify(result)
+        return jsonify([{'label': f'Week {k}', 'revenue': v} for k, v in sorted(buckets.items())])
     elif unit == 'year':
         month_names = {f"{m:02d}": n for m, n in enumerate(
             ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'], 1)}
-        return jsonify([{'label': month_names.get(r['label'], r['label']), 'revenue': r['revenue']} for r in rows])
-    else:
-        return jsonify([{'label': r['label'], 'revenue': r['revenue']} for r in rows])
+        return jsonify([{'label': month_names.get(k, k), 'revenue': v} for k, v in sorted(buckets.items())])
+    return jsonify([{'label': k, 'revenue': v} for k, v in sorted(buckets.items())])
 
 @app.route('/api/sales/top-products', methods=['GET'])
 @login_required
 def api_sales_top_products():
     unit = request.args.get('unit', 'month')
-    offset = int(request.args.get('offset', 0))
-    start_date, end_date = get_date_range(unit, offset)
-    if not start_date:
+    offset = _int_arg('offset')
+    if offset is None:
+        return jsonify({'error': 'invalid offset'}), 400
+    tz = _client_tz(request.args.get('tz'))
+    start, end = get_date_range(unit, offset, tz)
+    if not start:
         return jsonify({'error': 'invalid unit'}), 400
 
     db = g.db
-    date_filter, params = build_date_filter(start_date, end_date)
+    date_filter, params = build_date_filter(start, end)
     base_query = """
         SELECT p.id, p.name, p.sku, SUM(oi.quantity) as total_sold, SUM(oi.subtotal) as total_revenue
         FROM order_items oi
