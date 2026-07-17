@@ -24,7 +24,12 @@ def format_rupiah(amount):
 
 @app.template_filter('format_datetime')
 def format_datetime(utc_str):
-    dt = datetime.fromisoformat(utc_str).replace(tzinfo=timezone.utc)
+    if not utc_str:
+        return ''
+    try:
+        dt = datetime.fromisoformat(str(utc_str)).replace(tzinfo=timezone.utc)
+    except ValueError:
+        return str(utc_str)
     return dt.astimezone().strftime('%Y-%m-%d %H:%M:%S')
 
 @app.before_request
@@ -76,11 +81,8 @@ def dashboard():
         WHERE is_archived = 0
     """).fetchone()['total']
     recent_orders = db.execute("""
-        SELECT o.*, p.name as product_name
-        FROM orders o
-        LEFT JOIN order_items oi ON o.id = oi.order_id
-        LEFT JOIN products p ON oi.product_id = p.id
-        ORDER BY o.created_at DESC
+        SELECT * FROM orders
+        ORDER BY created_at DESC
         LIMIT 5
     """).fetchall()
     low_stock_products = db.execute("""
@@ -363,7 +365,7 @@ def api_complete_order(id):
         new_qty = current['stock_qty'] - item['quantity']
         if new_qty < 0:
             g.db.rollback()
-            return jsonify({'error': f"Insufficient stock for product #{item['product_id']}"}, 400)
+            return jsonify({'error': f"Insufficient stock for product #{item['product_id']}"}), 400
         g.db.execute("UPDATE products SET stock_qty = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (new_qty, item['product_id']))
     g.db.execute("UPDATE orders SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (id,))
     g.db.commit()
