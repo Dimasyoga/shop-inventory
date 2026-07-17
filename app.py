@@ -259,10 +259,14 @@ def api_stock_adjust():
     product = g.db.execute("SELECT * FROM products WHERE id = ?", (product_id,)).fetchone()
     if not product:
         return jsonify({'error': 'Product not found'}), 404
-    new_qty = product['stock_qty'] + change_qty
-    if new_qty < 0:
+    cur = g.db.execute(
+        "UPDATE products SET stock_qty = stock_qty + ?, updated_at = CURRENT_TIMESTAMP"
+        " WHERE id = ? AND stock_qty + ? >= 0",
+        (change_qty, product_id, change_qty))
+    if cur.rowcount == 0:
+        g.db.rollback()
         return jsonify({'error': 'Insufficient stock'}), 400
-    g.db.execute("UPDATE products SET stock_qty = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (new_qty, product_id))
+    new_qty = g.db.execute("SELECT stock_qty FROM products WHERE id = ?", (product_id,)).fetchone()['stock_qty']
     g.db.execute("INSERT INTO stock_logs (product_id, change_qty, reason) VALUES (?, ?, ?)", (product_id, change_qty, reason))
     g.db.commit()
     return jsonify({'success': True, 'new_qty': new_qty})
@@ -367,12 +371,17 @@ def api_complete_order(id):
         return jsonify({'error': 'Only confirmed orders can be completed'}), 400
     items = g.db.execute("SELECT * FROM order_items WHERE order_id = ?", (id,)).fetchall()
     for item in items:
-        current = g.db.execute("SELECT stock_qty FROM products WHERE id = ?", (item['product_id'],)).fetchone()
-        new_qty = current['stock_qty'] - item['quantity']
-        if new_qty < 0:
+        # Conditional decrement is atomic: no read-modify-write window for concurrent
+        # requests to double-count against.
+        cur = g.db.execute(
+            "UPDATE products SET stock_qty = stock_qty - ?, updated_at = CURRENT_TIMESTAMP"
+            " WHERE id = ? AND stock_qty >= ?",
+            (item['quantity'], item['product_id'], item['quantity']))
+        if cur.rowcount == 0:
             g.db.rollback()
             return jsonify({'error': f"Insufficient stock for product #{item['product_id']}"}), 400
-        g.db.execute("UPDATE products SET stock_qty = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (new_qty, item['product_id']))
+        g.db.execute("INSERT INTO stock_logs (product_id, change_qty, reason) VALUES (?, ?, ?)",
+                     (item['product_id'], -item['quantity'], f'sale order #{id}'))
     g.db.execute("UPDATE orders SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (id,))
     g.db.commit()
     return jsonify({'success': True})
@@ -421,11 +430,16 @@ def api_restock():
         product_id = item.get('product_id')
         qty_added = int(item.get('qty', 0))
         allocated_cost = (qty_added / total_qty) * batch_total_cost if total_qty > 0 else 0
-        product = g.db.execute("SELECT * FROM products WHERE id = ?", (product_id,)).fetchone()
-        new_qty = product['stock_qty'] + qty_added
-        g.db.execute("UPDATE products SET stock_qty = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (new_qty, product_id))
+        cur = g.db.execute(
+            "UPDATE products SET stock_qty = stock_qty + ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (qty_added, product_id))
+        if cur.rowcount == 0:
+            g.db.rollback()
+            return jsonify({'error': f'Product {product_id} not found'}), 404
         g.db.execute("INSERT INTO restock_items (batch_id, product_id, qty_added, allocated_cost) VALUES (?, ?, ?, ?)",
                      (batch_id, product_id, qty_added, allocated_cost))
+        g.db.execute("INSERT INTO stock_logs (product_id, change_qty, reason) VALUES (?, ?, ?)",
+                     (product_id, qty_added, f'restock batch #{batch_id}'))
     g.db.commit()
     return jsonify({'success': True, 'total_cost': batch_total_cost})
 

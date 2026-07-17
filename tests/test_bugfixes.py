@@ -77,3 +77,52 @@ def test_dashboard_lists_multi_item_order_once(client, product, order):
     oid = order([(p1, 1, 100), (p2, 1, 100), (p3, 1, 100)], status="draft")
     html = client.get("/").get_data(as_text=True)
     assert html.count(f"Order #{oid}") == 1
+
+
+# --- Phase 3: atomic stock updates + audit logging ---
+
+def stock_logs_for(product_id):
+    rows, _ = run_sql("SELECT change_qty, reason FROM stock_logs WHERE product_id = ?", (product_id,))
+    return [(r["change_qty"], r["reason"]) for r in rows]
+
+
+def test_partial_completion_rolls_back_everything(client, product, order):
+    """Item 1 in stock, item 2 not: order must stay confirmed with NO stock or log changes."""
+    p_ok = product(stock=10, name="InStock")
+    p_short = product(stock=1, name="Short")
+    oid = order([(p_ok, 5, 1000), (p_short, 3, 1000)])
+
+    res = client.post(f"/api/orders/{oid}/complete")
+    assert res.status_code == 400
+    assert stock_of(p_ok) == 10  # decrement of item 1 rolled back
+    rows, _ = run_sql("SELECT status FROM orders WHERE id = ?", (oid,))
+    assert rows[0]["status"] == "confirmed"
+    assert stock_logs_for(p_ok) == []
+
+
+def test_completion_decrements_stock_and_logs(client, product, order):
+    pid = product(stock=10)
+    oid = order([(pid, 4, 1000)])
+    res = client.post(f"/api/orders/{oid}/complete")
+    assert res.status_code == 200
+    assert stock_of(pid) == 6
+    assert stock_logs_for(pid) == [(-4, f"sale order #{oid}")]
+
+
+def test_restock_increments_stock_and_logs(client, product):
+    pid = product(stock=5)
+    res = client.post("/api/restock", json={"items": [{"product_id": pid, "qty": 7}], "total_cost": 10000})
+    assert res.status_code == 200
+    assert stock_of(pid) == 12
+    logs = stock_logs_for(pid)
+    assert len(logs) == 1
+    assert logs[0][0] == 7
+    assert logs[0][1].startswith("restock batch #")
+
+
+def test_adjust_below_zero_rejected_and_unchanged(client, product):
+    pid = product(stock=3)
+    res = client.post("/api/stock/adjust", json={"product_id": pid, "change_qty": -5, "reason": "shrinkage"})
+    assert res.status_code == 400
+    assert stock_of(pid) == 3
+    assert stock_logs_for(pid) == []
