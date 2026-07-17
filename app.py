@@ -3,6 +3,7 @@ from database import get_db, init_db
 from functools import wraps
 from datetime import datetime, timedelta, timezone, date, time as dtime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+import sqlite3
 
 app = Flask(__name__)
 app.secret_key = 'shop-inventory-secret-key-2024'
@@ -14,6 +15,39 @@ def login_required(f):
             return redirect(url_for('login'))
         return f(*args, **kwargs)
     return decorated
+
+def _json_body():
+    """Parsed JSON object from the request, or None (caller returns 400)."""
+    data = request.get_json(silent=True)
+    return data if isinstance(data, dict) else None
+
+def _validate_product(data):
+    """Return (fields, error). fields excludes stock_qty; callers add it where allowed."""
+    name = data.get('name')
+    name = name.strip() if isinstance(name, str) else ''
+    if not name:
+        return None, 'Name required'
+    try:
+        price = float(data.get('price', 0))
+    except (TypeError, ValueError):
+        return None, 'Price must be a number'
+    if not (price >= 0):  # also rejects NaN
+        return None, 'Price must be 0 or more'
+    try:
+        threshold = int(data.get('reorder_threshold', 0))
+    except (TypeError, ValueError):
+        return None, 'Reorder threshold must be a whole number'
+    if threshold < 0:
+        return None, 'Reorder threshold must be 0 or more'
+    sku = data.get('sku')
+    sku = (sku.strip() if isinstance(sku, str) else '') or None
+    return {
+        'name': name,
+        'sku': sku,
+        'category_id': data.get('category_id') or None,
+        'price': price,
+        'reorder_threshold': threshold,
+    }, None
 
 def format_rupiah(amount):
     """Format number as Indonesian Rupiah: Rp 150.000"""
@@ -127,30 +161,36 @@ def api_categories():
 @app.route('/api/categories', methods=['POST'])
 @login_required
 def api_create_category():
-    data = request.get_json()
-    name = data.get('name', '').strip()
+    data = _json_body()
+    if data is None:
+        return jsonify({'error': 'Invalid JSON body'}), 400
+    name = data.get('name')
+    name = name.strip() if isinstance(name, str) else ''
     if not name:
         return jsonify({'error': 'Name required'}), 400
     try:
         g.db.execute("INSERT INTO categories (name) VALUES (?)", (name,))
         g.db.commit()
         return jsonify({'success': True})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 400
+    except sqlite3.IntegrityError:
+        return jsonify({'error': 'Category already exists'}), 400
 
 @app.route('/api/categories/<int:id>', methods=['PUT'])
 @login_required
 def api_update_category(id):
-    data = request.get_json()
-    name = data.get('name', '').strip()
+    data = _json_body()
+    if data is None:
+        return jsonify({'error': 'Invalid JSON body'}), 400
+    name = data.get('name')
+    name = name.strip() if isinstance(name, str) else ''
     if not name:
         return jsonify({'error': 'Name required'}), 400
     try:
         g.db.execute("UPDATE categories SET name = ? WHERE id = ?", (name, id))
         g.db.commit()
         return jsonify({'success': True})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 400
+    except sqlite3.IntegrityError:
+        return jsonify({'error': 'Category already exists'}), 400
 
 @app.route('/api/categories/<int:id>', methods=['DELETE'])
 @login_required
@@ -199,45 +239,50 @@ def api_products():
 @app.route('/api/products', methods=['POST'])
 @login_required
 def api_create_product():
-    data = request.get_json()
+    data = _json_body()
+    if data is None:
+        return jsonify({'error': 'Invalid JSON body'}), 400
+    fields, err = _validate_product(data)
+    if err:
+        return jsonify({'error': err}), 400
+    try:
+        stock_qty = int(data.get('stock_qty', 0))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Stock must be a whole number'}), 400
+    if stock_qty < 0:
+        return jsonify({'error': 'Stock must be 0 or more'}), 400
     try:
         cur = g.db.execute("""
             INSERT INTO products (name, sku, category_id, price, stock_qty, reorder_threshold)
             VALUES (?, ?, ?, ?, ?, ?)
-        """, (
-            data.get('name', '').strip(),
-            data.get('sku', '').strip() or None,
-            data.get('category_id') or None,
-            float(data.get('price', 0)),
-            int(data.get('stock_qty', 0)),
-            int(data.get('reorder_threshold', 0))
-        ))
+        """, (fields['name'], fields['sku'], fields['category_id'],
+              fields['price'], stock_qty, fields['reorder_threshold']))
         g.db.commit()
         return jsonify({'success': True, 'id': cur.lastrowid})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 400
+    except sqlite3.IntegrityError:
+        return jsonify({'error': 'SKU already exists'}), 400
 
 @app.route('/api/products/<int:id>', methods=['PUT'])
 @login_required
 def api_update_product(id):
-    data = request.get_json()
+    data = _json_body()
+    if data is None:
+        return jsonify({'error': 'Invalid JSON body'}), 400
+    fields, err = _validate_product(data)
+    if err:
+        return jsonify({'error': err}), 400
     try:
+        # stock_qty is deliberately not updatable here: overwriting it from a stale edit
+        # form would erase concurrent sales. Stock changes go through orders and restock.
         g.db.execute("""
-            UPDATE products SET name=?, sku=?, category_id=?, price=?, stock_qty=?, reorder_threshold=?, updated_at=CURRENT_TIMESTAMP
+            UPDATE products SET name=?, sku=?, category_id=?, price=?, reorder_threshold=?, updated_at=CURRENT_TIMESTAMP
             WHERE id=?
-        """, (
-            data.get('name', '').strip(),
-            data.get('sku', '').strip() or None,
-            data.get('category_id') or None,
-            float(data.get('price', 0)),
-            int(data.get('stock_qty', 0)),
-            int(data.get('reorder_threshold', 0)),
-            id
-        ))
+        """, (fields['name'], fields['sku'], fields['category_id'],
+              fields['price'], fields['reorder_threshold'], id))
         g.db.commit()
         return jsonify({'success': True})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 400
+    except sqlite3.IntegrityError:
+        return jsonify({'error': 'SKU already exists'}), 400
 
 @app.route('/api/products/<int:id>', methods=['DELETE'])
 @login_required
@@ -250,12 +295,15 @@ def api_delete_product(id):
 @app.route('/api/stock/adjust', methods=['POST'])
 @login_required
 def api_stock_adjust():
-    data = request.get_json()
+    data = _json_body()
+    if data is None:
+        return jsonify({'error': 'Invalid JSON body'}), 400
     product_id = data.get('product_id')
-    change_qty = int(data.get('change_qty', 0))
-    reason = data.get('reason', '').strip()
-    if not product_id or change_qty == 0:
-        return jsonify({'error': 'Product ID and quantity required'}), 400
+    change_qty = data.get('change_qty')
+    reason = data.get('reason')
+    reason = reason.strip() if isinstance(reason, str) else ''
+    if not product_id or not isinstance(change_qty, int) or isinstance(change_qty, bool) or change_qty == 0:
+        return jsonify({'error': 'Product ID and a non-zero whole-number quantity required'}), 400
     product = g.db.execute("SELECT * FROM products WHERE id = ?", (product_id,)).fetchone()
     if not product:
         return jsonify({'error': 'Product not found'}), 404
@@ -319,12 +367,22 @@ def api_orders():
 @app.route('/api/orders', methods=['POST'])
 @login_required
 def api_create_order():
-    data = request.get_json()
-    items = data.get('items', [])
-    if not items:
+    data = _json_body()
+    if data is None:
+        return jsonify({'error': 'Invalid JSON body'}), 400
+    items = data.get('items')
+    if not isinstance(items, list) or not items:
         return jsonify({'error': 'At least one item required'}), 400
+    for item in items:
+        pid = item.get('product_id') if isinstance(item, dict) else None
+        qty = item.get('quantity') if isinstance(item, dict) else None
+        # bool is an int subclass: True would slip through as quantity 1
+        if not isinstance(pid, int) or isinstance(pid, bool) \
+                or not isinstance(qty, int) or isinstance(qty, bool) or qty <= 0:
+            return jsonify({'error': 'Each item needs a product_id and a positive whole-number quantity'}), 400
+
     total = 0
-    product_ids = set()
+    rows = []
     for item in items:
         product = g.db.execute("SELECT * FROM products WHERE id = ?", (item['product_id'],)).fetchone()
         if not product:
@@ -333,18 +391,14 @@ def api_create_order():
             return jsonify({'error': f"Insufficient stock for {product['name']}"}), 400
         subtotal = product['price'] * item['quantity']
         total += subtotal
-        product_ids.add(product['id'])
+        rows.append((item['product_id'], item['quantity'], product['price'], subtotal))
 
     cur = g.db.execute("INSERT INTO orders (status, total_amount) VALUES (?, ?)", ('draft', total))
     order_id = cur.lastrowid
-
-    for item in items:
-        product = g.db.execute("SELECT * FROM products WHERE id = ?", (item['product_id'],)).fetchone()
-        subtotal = product['price'] * item['quantity']
-        g.db.execute("""
-            INSERT INTO order_items (order_id, product_id, quantity, unit_price, subtotal)
-            VALUES (?, ?, ?, ?, ?)
-        """, (order_id, item['product_id'], item['quantity'], product['price'], subtotal))
+    g.db.executemany("""
+        INSERT INTO order_items (order_id, product_id, quantity, unit_price, subtotal)
+        VALUES (?, ?, ?, ?, ?)
+    """, [(order_id, pid, qty, price, subtotal) for pid, qty, price, subtotal in rows])
 
     g.db.commit()
     return jsonify({'success': True, 'order_id': order_id, 'total': total})
@@ -409,17 +463,22 @@ def restock_page():
 @app.route('/api/restock', methods=['POST'])
 @login_required
 def api_restock():
-    data = request.get_json()
-    items = data.get('items', [])
-    batch_total_cost = float(data.get('total_cost', 0))
-    if not items:
+    data = _json_body()
+    if data is None:
+        return jsonify({'error': 'Invalid JSON body'}), 400
+    items = data.get('items')
+    if not isinstance(items, list) or not items:
         return jsonify({'error': 'At least one item required'}), 400
+    batch_total_cost = data.get('total_cost', 0)
+    if isinstance(batch_total_cost, bool) or not isinstance(batch_total_cost, (int, float)) or not (batch_total_cost >= 0):
+        return jsonify({'error': 'Total cost must be 0 or more'}), 400
+    batch_total_cost = float(batch_total_cost)
     total_qty = 0
     for item in items:
-        product_id = item.get('product_id')
-        qty_added = int(item.get('qty', 0))
-        if not product_id or qty_added <= 0:
-            return jsonify({'error': 'Valid product and quantity required'}), 400
+        product_id = item.get('product_id') if isinstance(item, dict) else None
+        qty_added = item.get('qty') if isinstance(item, dict) else None
+        if not product_id or not isinstance(qty_added, int) or isinstance(qty_added, bool) or qty_added <= 0:
+            return jsonify({'error': 'Valid product and positive whole-number quantity required'}), 400
         product = g.db.execute("SELECT * FROM products WHERE id = ?", (product_id,)).fetchone()
         if not product:
             return jsonify({'error': f"Product {product_id} not found"}), 404

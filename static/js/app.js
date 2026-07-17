@@ -109,9 +109,10 @@ function openProductModal(id = null) {
     document.getElementById('productForm').reset();
     document.getElementById('productId').value = '';
     document.getElementById('modalTitle').textContent = 'Add Product';
+    document.getElementById('productStock').disabled = false;
     document.getElementById('stockWarning').style.display = 'none';
     if (id) {
-        fetch('/api/products').then(r => r.json()).then(products => {
+        fetchJson('/api/products').then(products => {
             const p = products.find(x => x.id === id);
             if (p) {
                 document.getElementById('productId').value = p.id;
@@ -120,6 +121,8 @@ function openProductModal(id = null) {
                 document.getElementById('productCategory').value = p.category_id || '';
                 document.getElementById('productPrice').value = p.price;
                 document.getElementById('productStock').value = p.stock_qty;
+                document.getElementById('productStock').disabled = true;
+                document.getElementById('stockWarning').style.display = 'block';
                 document.getElementById('productThreshold').value = p.reorder_threshold;
                 document.getElementById('modalTitle').textContent = 'Edit Product';
             }
@@ -131,16 +134,6 @@ function closeProductModal() { document.getElementById('productModal').classList
 
 function editProduct(id) { openProductModal(id); }
 
-function onStockChange() {
-    const pid = document.getElementById('productId').value;
-    const warning = document.getElementById('stockWarning');
-    if (pid) {
-        warning.style.display = 'block';
-    } else {
-        warning.style.display = 'none';
-    }
-}
-
 function saveProduct(e) {
     e.preventDefault();
     const id = document.getElementById('productId').value;
@@ -149,9 +142,11 @@ function saveProduct(e) {
         sku: document.getElementById('productSku').value,
         category_id: document.getElementById('productCategory').value || null,
         price: parseFloat(document.getElementById('productPrice').value) || 0,
-        stock_qty: parseInt(document.getElementById('productStock').value) || 0,
         reorder_threshold: parseInt(document.getElementById('productThreshold').value) || 0
     };
+    if (!id) {
+        data.stock_qty = parseInt(document.getElementById('productStock').value) || 0;
+    }
     const method = id ? 'PUT' : 'POST';
     const url = id ? '/api/products/' + id : '/api/products';
     api(url, method, data).then(d => {

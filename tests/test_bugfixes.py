@@ -126,3 +126,87 @@ def test_adjust_below_zero_rejected_and_unchanged(client, product):
     assert res.status_code == 400
     assert stock_of(pid) == 3
     assert stock_logs_for(pid) == []
+
+
+# --- Phase 4: input validation ---
+
+def order_count():
+    rows, _ = run_sql("SELECT COUNT(*) AS cnt FROM orders")
+    return rows[0]["cnt"]
+
+
+@pytest.mark.parametrize("qty", [-5, 0, "abc", None, True])
+def test_order_rejects_bad_quantity(client, product, qty):
+    """Regression: quantity -5 passed the stock check and created stock on completion."""
+    pid = product(stock=10)
+    item = {"product_id": pid, "quantity": qty}
+    if qty is None:
+        del item["quantity"]
+    res = client.post("/api/orders", json={"items": [item]})
+    assert res.status_code == 400
+    assert order_count() == 0
+
+
+def test_order_rejects_missing_product_id(client):
+    res = client.post("/api/orders", json={"items": [{"quantity": 2}]})
+    assert res.status_code == 400
+    assert order_count() == 0
+
+
+def test_order_rejects_non_dict_item(client):
+    res = client.post("/api/orders", json={"items": ["nonsense"]})
+    assert res.status_code == 400
+    assert order_count() == 0
+
+
+def test_valid_order_still_works(client, product):
+    pid = product(stock=10)
+    res = client.post("/api/orders", json={"items": [{"product_id": pid, "quantity": 3}]})
+    assert res.status_code == 200
+    assert res.get_json()["total"] == 15000
+
+
+@pytest.mark.parametrize("path,method", [
+    ("/api/products", "post"),
+    ("/api/orders", "post"),
+    ("/api/restock", "post"),
+    ("/api/categories", "post"),
+    ("/api/stock/adjust", "post"),
+])
+def test_non_json_body_returns_400(client, path, method):
+    """Regression: a text/plain body raised an unhandled 415/400."""
+    res = getattr(client, method)(path, data="not json", content_type="text/plain")
+    assert res.status_code == 400
+
+
+def test_product_rejects_empty_name_and_negative_price(client):
+    assert client.post("/api/products", json={"name": "  "}).status_code == 400
+    assert client.post("/api/products", json={"name": "X", "price": -5}).status_code == 400
+    assert client.post("/api/products", json={"name": "X", "price": "abc"}).status_code == 400
+
+
+def test_duplicate_sku_does_not_leak_schema(client):
+    assert client.post("/api/products", json={"name": "A", "sku": "DUP", "price": 1}).status_code == 200
+    res = client.post("/api/products", json={"name": "B", "sku": "DUP", "price": 1})
+    assert res.status_code == 400
+    assert "UNIQUE constraint" not in res.get_json()["error"]
+
+
+def test_restock_rejects_garbage_qty_and_cost(client, product):
+    pid = product(stock=5)
+    assert client.post("/api/restock", json={"items": [{"product_id": pid, "qty": "x"}], "total_cost": 1}).status_code == 400
+    assert client.post("/api/restock", json={"items": [{"product_id": pid, "qty": 1}], "total_cost": "x"}).status_code == 400
+    assert client.post("/api/restock", json={"items": [{"product_id": pid, "qty": 1}], "total_cost": -10}).status_code == 400
+    assert stock_of(pid) == 5
+
+
+# --- Phase 5: product edit must not clobber stock ---
+
+def test_put_product_ignores_stock_qty(client, product):
+    pid = product(stock=10, name="Before")
+    res = client.put(f"/api/products/{pid}", json={"name": "After", "price": 9000, "stock_qty": 999})
+    assert res.status_code == 200
+    rows, _ = run_sql("SELECT name, price, stock_qty FROM products WHERE id = ?", (pid,))
+    assert rows[0]["name"] == "After"
+    assert rows[0]["price"] == 9000
+    assert rows[0]["stock_qty"] == 10
