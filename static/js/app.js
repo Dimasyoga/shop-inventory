@@ -48,6 +48,52 @@ function fetchJson(url) {
     });
 }
 
+/* ===== Settings ===== */
+function saveTelegramSettings(e) {
+    e.preventDefault();
+    api('/api/settings/telegram', 'POST', {
+        enabled: document.getElementById('tgEnabled').checked,
+        token: document.getElementById('tgToken').value,
+        whitelist: document.getElementById('tgWhitelist').value,
+        timezone: document.getElementById('tgTimezone').value
+    }).then(d => {
+        showToast(d.warning || 'Telegram settings saved', d.warning ? 'error' : 'success');
+        document.getElementById('tgToken').value = '';
+        document.getElementById('tgToken').placeholder = 'Saved — leave blank to keep';
+    }).catch(err => showToast(err.message, 'error'));
+}
+
+function testTelegramConnection() {
+    const result = document.getElementById('tgTestResult');
+    result.textContent = 'Testing…';
+    api('/api/settings/telegram/test', 'POST', {
+        token: document.getElementById('tgToken').value
+    }).then(d => {
+        result.textContent = `✅ Connected as @${d.bot_username}`;
+    }).catch(err => {
+        result.textContent = `❌ ${err.message}`;
+    });
+}
+
+function saveAccount(e) {
+    e.preventDefault();
+    const newPass = document.getElementById('accNew').value;
+    if (newPass && newPass !== document.getElementById('accConfirm').value) {
+        showToast('New passwords do not match', 'error');
+        return;
+    }
+    api('/api/settings/account', 'POST', {
+        current_password: document.getElementById('accCurrent').value,
+        new_username: document.getElementById('accUsername').value,
+        new_password: newPass
+    }).then(() => {
+        showToast('Account updated');
+        document.getElementById('accCurrent').value = '';
+        document.getElementById('accNew').value = '';
+        document.getElementById('accConfirm').value = '';
+    }).catch(err => showToast(err.message, 'error'));
+}
+
 /* ===== Categories ===== */
 function openCategoryModal(id = null, name = '') {
     document.getElementById('catId').value = id || '';

@@ -261,3 +261,8 @@ select { padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-siz
     .time-controls { width: 100%; justify-content: space-between; }
     .chart-container { height: 220px; }
 }
+
+/* Settings page */
+.help-text { font-size: 13px; color: #777; margin-bottom: 12px; }
+.help-text a { color: #4361ee; }
+.form-actions { display: flex; gap: 8px; margin-top: 16px; }

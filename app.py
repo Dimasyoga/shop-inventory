@@ -11,6 +11,7 @@ import secrets
 import services
 from services import (ServiceError, format_rupiah, get_date_range,
                       build_date_filter, _to_utc_str)
+from telegram_bot import TelegramAPI, TelegramError
 
 _SECRET_PATH = os.path.join(os.path.dirname(__file__), '.secret_key')
 
@@ -506,6 +507,117 @@ def api_restock_history():
             'items': [dict(i) for i in items]
         })
     return jsonify(result)
+
+# --- Settings ---
+def _parse_whitelist(raw):
+    """Comma/space separated Telegram user IDs -> list[int]. Raises ValueError naming the bad entry."""
+    ids = []
+    for tok in raw.replace(',', ' ').split():
+        if not tok.lstrip('-').isdigit():
+            raise ValueError(f"'{tok}' is not a numeric Telegram user ID")
+        ids.append(int(tok))
+    return ids
+
+@app.route('/settings')
+@login_required
+def settings_page():
+    from database import get_setting
+    return render_template('settings.html',
+        telegram_enabled=get_setting(g.db, 'telegram_enabled', '0') == '1',
+        token_set=bool(get_setting(g.db, 'telegram_bot_token', '')),
+        whitelist=get_setting(g.db, 'telegram_whitelist', ''),
+        shop_timezone=get_setting(g.db, 'shop_timezone', 'Asia/Jakarta'),
+        username=session.get('username', ''))
+
+@app.route('/api/settings/telegram', methods=['POST'])
+@login_required
+def api_settings_telegram():
+    from database import get_setting, set_setting
+    data = _json_body()
+    if data is None:
+        return jsonify({'error': 'Invalid JSON body'}), 400
+    enabled = bool(data.get('enabled'))
+    token = data.get('token')
+    token = token.strip() if isinstance(token, str) else ''
+    whitelist_raw = data.get('whitelist')
+    whitelist_raw = whitelist_raw.strip() if isinstance(whitelist_raw, str) else ''
+    tz_name = data.get('timezone')
+    tz_name = tz_name.strip() if isinstance(tz_name, str) else ''
+
+    try:
+        ids = _parse_whitelist(whitelist_raw)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    if tz_name:
+        try:
+            ZoneInfo(tz_name)
+        except (ZoneInfoNotFoundError, ValueError):
+            return jsonify({'error': f"Unknown timezone '{tz_name}'"}), 400
+
+    # Blank token means keep the saved one; the saved value is never echoed to the browser.
+    effective_token = token or get_setting(g.db, 'telegram_bot_token', '')
+    if enabled and not effective_token:
+        return jsonify({'error': 'Bot token required to enable the bot'}), 400
+
+    set_setting(g.db, 'telegram_enabled', '1' if enabled else '0')
+    if token:
+        set_setting(g.db, 'telegram_bot_token', token)
+    set_setting(g.db, 'telegram_whitelist', ','.join(str(i) for i in ids))
+    if tz_name:
+        set_setting(g.db, 'shop_timezone', tz_name)
+    g.db.commit()
+    warning = 'No users whitelisted — the bot will reject everyone' if enabled and not ids else None
+    return jsonify({'success': True, 'warning': warning})
+
+@app.route('/api/settings/telegram/test', methods=['POST'])
+@login_required
+def api_settings_telegram_test():
+    from database import get_setting
+    data = _json_body() or {}
+    token = data.get('token')
+    token = token.strip() if isinstance(token, str) else ''
+    token = token or get_setting(g.db, 'telegram_bot_token', '')
+    if not token:
+        return jsonify({'error': 'No bot token saved or provided'}), 400
+    try:
+        me = TelegramAPI(token, timeout=10).call('getMe')
+    except TelegramError as e:
+        return jsonify({'error': f'Telegram rejected the token: {e}'}), 400
+    except OSError:
+        return jsonify({'error': 'Could not reach api.telegram.org'}), 400
+    return jsonify({'success': True, 'bot_username': me.get('username', '')})
+
+@app.route('/api/settings/account', methods=['POST'])
+@login_required
+def api_settings_account():
+    from werkzeug.security import generate_password_hash
+    data = _json_body()
+    if data is None:
+        return jsonify({'error': 'Invalid JSON body'}), 400
+    current = data.get('current_password') or ''
+    new_username = data.get('new_username')
+    new_username = new_username.strip() if isinstance(new_username, str) else ''
+    new_password = data.get('new_password') or ''
+
+    user = g.db.execute("SELECT * FROM users WHERE id = ?", (session['user_id'],)).fetchone()
+    if not user or not check_password_hash(user['password'], current):
+        return jsonify({'error': 'Current password is incorrect'}), 400
+    if not new_username and not new_password:
+        return jsonify({'error': 'Nothing to change'}), 400
+    if new_password and len(new_password) < 6:
+        return jsonify({'error': 'New password must be at least 6 characters'}), 400
+
+    try:
+        if new_username and new_username != user['username']:
+            g.db.execute("UPDATE users SET username = ? WHERE id = ?", (new_username, user['id']))
+            session['username'] = new_username
+        if new_password:
+            g.db.execute("UPDATE users SET password = ? WHERE id = ?",
+                         (generate_password_hash(new_password), user['id']))
+        g.db.commit()
+    except sqlite3.IntegrityError:
+        return jsonify({'error': 'Username already taken'}), 400
+    return jsonify({'success': True})
 
 # --- Sales Dashboard ---
 @app.route('/sales')

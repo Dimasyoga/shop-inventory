@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Settings - Shop Inventory{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h2>⚙️ Settings</h2>
+</div>
+
+<div class="card">
+    <h3>🤖 Telegram Bot</h3>
+    <p class="help-text">
+        Create a bot with <a href="https://t.me/BotFather" target="_blank" rel="noopener">@BotFather</a>,
+        paste its token here, and whitelist your Telegram user ID.
+        To find your ID: enable the bot, message it, and it replies with your ID.
+    </p>
+    <form id="telegramForm" onsubmit="saveTelegramSettings(event)">
+        <div class="form-group">
+            <label>
+                <input type="checkbox" id="tgEnabled" {% if telegram_enabled %}checked{% endif %}>
+                Enable bot
+            </label>
+        </div>
+        <div class="form-group">
+            <label for="tgToken">Bot token</label>
+            <input type="password" id="tgToken" autocomplete="off"
+                   placeholder="{% if token_set %}Saved — leave blank to keep{% else %}123456:ABC-...{% endif %}">
+        </div>
+        <div class="form-group">
+            <label for="tgWhitelist">Whitelisted Telegram user IDs (comma-separated)</label>
+            <input type="text" id="tgWhitelist" value="{{ whitelist }}" placeholder="e.g. 123456789, 987654321">
+        </div>
+        <div class="form-group">
+            <label for="tgTimezone">Shop timezone (for bot sales summaries)</label>
+            <input type="text" id="tgTimezone" value="{{ shop_timezone }}" placeholder="Asia/Jakarta">
+        </div>
+        <div class="form-actions">
+            <button type="button" class="btn" onclick="testTelegramConnection()">Test Connection</button>
+            <button type="submit" class="btn btn-primary">Save</button>
+        </div>
+        <p id="tgTestResult" class="help-text"></p>
+    </form>
+</div>
+
+<div class="card">
+    <h3>👤 Account</h3>
+    <form id="accountForm" onsubmit="saveAccount(event)">
+        <div class="form-group">
+            <label for="accUsername">Username</label>
+            <input type="text" id="accUsername" value="{{ username }}" autocomplete="username">
+        </div>
+        <div class="form-group">
+            <label for="accCurrent">Current password</label>
+            <input type="password" id="accCurrent" autocomplete="current-password" required>
+        </div>
+        <div class="form-group">
+            <label for="accNew">New password (leave blank to keep)</label>
+            <input type="password" id="accNew" autocomplete="new-password">
+        </div>
+        <div class="form-group">
+            <label for="accConfirm">Confirm new password</label>
+            <input type="password" id="accConfirm" autocomplete="new-password">
+        </div>
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Update Account</button>
+        </div>
+    </form>
+</div>
+{% endblock %}
