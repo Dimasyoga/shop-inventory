@@ -3,10 +3,31 @@ from database import get_db, init_db
 from functools import wraps
 from datetime import datetime, timedelta, timezone, date, time as dtime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from werkzeug.security import check_password_hash
 import sqlite3
+import os
+import secrets
+
+_SECRET_PATH = os.path.join(os.path.dirname(__file__), '.secret_key')
+
+def _load_secret_key():
+    """Persisted random secret so sessions survive restarts without a key in the repo."""
+    try:
+        with open(_SECRET_PATH, 'rb') as f:
+            key = f.read()
+        if key:
+            return key
+    except FileNotFoundError:
+        pass
+    key = secrets.token_bytes(32)
+    fd = os.open(_SECRET_PATH, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, 'wb') as f:
+        f.write(key)
+    return key
 
 app = Flask(__name__)
-app.secret_key = 'shop-inventory-secret-key-2024'
+app.secret_key = _load_secret_key()
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 
 def login_required(f):
     @wraps(f)
@@ -85,7 +106,7 @@ def login():
         password = request.form.get('password', '')
         db = g.db
         user = db.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
-        if user and user['password'] == password:
+        if user and check_password_hash(user['password'], password):
             session['user_id'] = user['id']
             session['username'] = user['username']
             return redirect(url_for('dashboard'))
@@ -718,4 +739,7 @@ def api_sales_top_products():
 
 if __name__ == '__main__':
     init_db()
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    # debug exposes the Werkzeug console (remote code execution) to anyone on the
+    # network; it must never default on for a 0.0.0.0 bind.
+    debug = os.environ.get('FLASK_DEBUG', '').lower() in ('1', 'true', 'yes')
+    app.run(host='0.0.0.0', port=5000, debug=debug)

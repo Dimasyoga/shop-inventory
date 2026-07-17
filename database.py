@@ -1,6 +1,7 @@
 import sqlite3
 import os
 from datetime import datetime
+from werkzeug.security import generate_password_hash
 
 DB_PATH = os.path.join(os.path.dirname(__file__), 'shop.db')
 
@@ -112,7 +113,16 @@ def init_db():
     # Seed default user
     c.execute("SELECT COUNT(*) FROM users")
     if c.fetchone()[0] == 0:
-        c.execute("INSERT INTO users (username, password) VALUES (?, ?)", ('admin', 'admin123'))
+        c.execute("INSERT INTO users (username, password) VALUES (?, ?)",
+                  ('admin', generate_password_hash('admin123')))
+
+    # Migrate: hash any plaintext passwords in place (idempotent; hashed values
+    # carry a method prefix and are skipped on re-run).
+    users = c.execute("SELECT id, password FROM users").fetchall()
+    for user_id, password in users:
+        if not password.startswith(('pbkdf2:', 'scrypt:')):
+            c.execute("UPDATE users SET password = ? WHERE id = ?",
+                      (generate_password_hash(password), user_id))
 
     conn.commit()
     conn.close()

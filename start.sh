@@ -32,4 +32,6 @@ echo "Default login: admin / admin123"
 echo "Press Ctrl+C to stop"
 echo ""
 
+# Set FLASK_DEBUG=1 to enable the interactive debugger (development only --
+# it allows code execution by anyone who can reach the server).
 venv/bin/python3 app.py

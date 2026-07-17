@@ -254,3 +254,48 @@ def test_put_product_ignores_stock_qty(client, product):
     assert rows[0]["name"] == "After"
     assert rows[0]["price"] == 9000
     assert rows[0]["stock_qty"] == 10
+
+
+# --- Phase 7: auth hardening ---
+
+def test_login_round_trip(db_path):
+    import app as app_module
+    app_module.app.config["TESTING"] = True
+    with app_module.app.test_client() as c:
+        res = c.post("/login", data={"username": "admin", "password": "admin123"})
+        assert res.status_code == 302  # redirect to dashboard on success
+        c.get("/logout")
+        res = c.post("/login", data={"username": "admin", "password": "wrong"})
+        assert res.status_code == 200
+        assert b"Invalid credentials" in res.data
+
+
+def test_seeded_password_is_hashed(db_path):
+    rows, _ = run_sql("SELECT password FROM users WHERE username = 'admin'")
+    assert rows[0]["password"].startswith(("pbkdf2:", "scrypt:"))
+
+
+def test_plaintext_password_migrated_on_init(db_path):
+    """Existing plaintext rows are hashed in place and the original password still works."""
+    from werkzeug.security import check_password_hash
+    run_sql("INSERT INTO users (username, password) VALUES ('legacy', 'oldpass')")
+    database.init_db()  # re-run: the migration should pick up the plaintext row
+    rows, _ = run_sql("SELECT password FROM users WHERE username = 'legacy'")
+    stored = rows[0]["password"]
+    assert stored != "oldpass"
+    assert check_password_hash(stored, "oldpass")
+    before = stored
+    database.init_db()  # idempotency: re-running must not re-hash
+    rows, _ = run_sql("SELECT password FROM users WHERE username = 'legacy'")
+    assert rows[0]["password"] == before
+
+
+def test_secret_key_is_stable_and_private(tmp_path, monkeypatch):
+    import app as app_module
+    monkeypatch.setattr(app_module, "_SECRET_PATH", str(tmp_path / ".secret_key"))
+    k1 = app_module._load_secret_key()
+    k2 = app_module._load_secret_key()
+    assert k1 == k2
+    assert len(k1) == 32
+    import os as _os
+    assert (_os.stat(tmp_path / ".secret_key").st_mode & 0o777) == 0o600
