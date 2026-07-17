@@ -102,7 +102,7 @@ def logout():
 def dashboard():
     db = g.db
     total_products = db.execute("SELECT COUNT(*) as cnt FROM products WHERE is_archived = 0").fetchone()['cnt']
-    total_orders = db.execute("SELECT COUNT(*) as cnt FROM orders").fetchone()['cnt']
+    total_orders = db.execute("SELECT COUNT(*) as cnt FROM orders WHERE status != 'cancelled'").fetchone()['cnt']
     low_stock = db.execute("""
         SELECT COUNT(*) as cnt FROM products
         WHERE is_archived = 0 AND stock_qty <= reorder_threshold
@@ -448,8 +448,9 @@ def api_cancel_order(id):
         return jsonify({'error': 'Order not found'}), 404
     if order['status'] == 'completed':
         return jsonify({'error': 'Cannot cancel completed orders'}), 400
-    g.db.execute("DELETE FROM order_items WHERE order_id = ?", (id,))
-    g.db.execute("DELETE FROM orders WHERE id = ?", (id,))
+    if order['status'] == 'cancelled':
+        return jsonify({'error': 'Order already cancelled'}), 400
+    g.db.execute("UPDATE orders SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (id,))
     g.db.commit()
     return jsonify({'success': True})
 

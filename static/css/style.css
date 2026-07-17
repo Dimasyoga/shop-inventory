@@ -108,6 +108,7 @@ select { padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-siz
 .badge-draft { background: #e9ecef; color: #555; }
 .badge-confirmed { background: #fef3c7; color: #d97706; }
 .badge-completed { background: #d1fae5; color: #059669; }
+.badge-cancelled { background: #fee2e2; color: #dc2626; }
 
 /* Modal */
 .modal {

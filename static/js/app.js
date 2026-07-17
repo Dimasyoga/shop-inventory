@@ -198,7 +198,7 @@ function loadOrders() {
                     <button class="btn-icon" onclick="viewOrder(${o.id})" title="View">👁️</button>
                     ${o.status === 'draft' ? `<button class="btn-icon" onclick="confirmOrder(${o.id})" title="Confirm">✅</button>` : ''}
                     ${o.status === 'confirmed' ? `<button class="btn-icon" onclick="completeOrder(${o.id})" title="Complete">💰</button>` : ''}
-                    ${o.status !== 'completed' ? `<button class="btn-icon" onclick="cancelOrder(${o.id})" title="Cancel">❌</button>` : ''}
+                    ${o.status === 'draft' || o.status === 'confirmed' ? `<button class="btn-icon" onclick="cancelOrder(${o.id})" title="Cancel">❌</button>` : ''}
                 </td>
             </tr>
         `).join('');

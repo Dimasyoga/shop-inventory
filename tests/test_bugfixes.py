@@ -202,6 +202,50 @@ def test_restock_rejects_garbage_qty_and_cost(client, product):
 
 # --- Phase 5: product edit must not clobber stock ---
 
+# --- Phase 6: soft-cancel orders ---
+
+def test_cancel_keeps_order_and_items(client, product, order):
+    """Regression: cancel hard-deleted the order and its items, destroying history."""
+    pid = product(stock=10)
+    oid = order([(pid, 2, 1000)], status="draft")
+    res = client.post(f"/api/orders/{oid}/cancel")
+    assert res.status_code == 200
+    rows, _ = run_sql("SELECT status FROM orders WHERE id = ?", (oid,))
+    assert rows[0]["status"] == "cancelled"
+    items, _ = run_sql("SELECT COUNT(*) AS cnt FROM order_items WHERE order_id = ?", (oid,))
+    assert items[0]["cnt"] == 1
+
+
+def test_cancel_completed_rejected(client, product, order):
+    pid = product()
+    oid = order([(pid, 1, 1000)], status="completed")
+    assert client.post(f"/api/orders/{oid}/cancel").status_code == 400
+
+
+def test_cancel_twice_rejected(client, product, order):
+    pid = product()
+    oid = order([(pid, 1, 1000)], status="draft")
+    assert client.post(f"/api/orders/{oid}/cancel").status_code == 200
+    assert client.post(f"/api/orders/{oid}/cancel").status_code == 400
+
+
+def test_cancelled_filter_and_dashboard_count(client, product, order):
+    pid = product()
+    kept = order([(pid, 1, 1000)], status="completed")
+    dropped = order([(pid, 1, 1000)], status="draft")
+    client.post(f"/api/orders/{dropped}/cancel")
+
+    listed = client.get("/api/orders?status=cancelled").get_json()
+    assert [o["id"] for o in listed] == [dropped]
+    drafts = client.get("/api/orders?status=draft").get_json()
+    assert dropped not in [o["id"] for o in drafts]
+
+    html = client.get("/").get_data(as_text=True)
+    import re
+    m = re.search(r'<div class="stat-value">(\d+)</div>\s*<div class="stat-label">Total Orders</div>', html)
+    assert m and m.group(1) == "1"  # the cancelled order is excluded from the count
+
+
 def test_put_product_ignores_stock_qty(client, product):
     pid = product(stock=10, name="Before")
     res = client.put(f"/api/products/{pid}", json={"name": "After", "price": 9000, "stock_qty": 999})
