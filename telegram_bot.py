@@ -20,6 +20,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from collections import namedtuple
 
 import database
+import i18n
 import services
 from services import ServiceError, format_rupiah
 
@@ -166,110 +167,114 @@ UNIT_CODES = {'d': 'day', 'w': 'week', 'm': 'month', 'y': 'year'}
 UNIT_LABELS = {'d': 'Day', 'w': 'Week', 'm': 'Month', 'y': 'Year'}
 
 
-def screen_main():
-    text = '<b>📦 Shop Inventory</b>\nWhat do you want to do?'
+def screen_main(t):
+    text = f'<b>📦 {t("Shop Inventory")}</b>\n{t("What do you want to do?")}'
     return text, kb(
-        [btn('📦 Products', 'p:0'), btn('🛒 Orders', 'o')],
-        [btn('🆕 New order', 'no'), btn('📥 Restock', 'r')],
-        [btn('📈 Sales summary', 's:d:0')])
+        [btn(t('📦 Products'), 'p:0'), btn(t('🛒 Orders'), 'o')],
+        [btn(t('🆕 New order'), 'no'), btn(t('📥 Restock'), 'r')],
+        [btn(t('📈 Sales summary'), 's:d:0')])
 
 
-def screen_products(db, page):
+def screen_products(db, page, t):
     rows, has_more = services.list_products(db, page=page, page_size=8)
     if not rows and page == 0:
-        return 'No products yet.', kb([btn('« Menu', 'm')])
-    lines = ['<b>📦 Products</b>']
+        return t('No products yet.'), kb([btn(t('« Menu'), 'm')])
+    lines = [f'<b>📦 {t("Products")}</b>']
     for p in rows:
         sku = f" [{esc(p['sku'])}]" if p['sku'] else ''
-        lines.append(f"• {esc(p['name'])}{sku} — {format_rupiah(p['price'])} (stock {p['stock_qty']})")
+        lines.append(f"• {esc(p['name'])}{sku} — {format_rupiah(p['price'])} ({t('stock {n}', n=p['stock_qty'])})")
     nav = []
     if page > 0:
-        nav.append(btn('◀ Prev', f'p:{page - 1}'))
+        nav.append(btn(t('◀ Prev'), f'p:{page - 1}'))
     if has_more:
-        nav.append(btn('Next ▶', f'p:{page + 1}'))
+        nav.append(btn(t('Next ▶'), f'p:{page + 1}'))
     rows_kb = [nav] if nav else []
-    rows_kb.append([btn('« Menu', 'm')])
+    rows_kb.append([btn(t('« Menu'), 'm')])
     return '\n'.join(lines), kb(*rows_kb)
 
 
-def screen_orders_menu():
-    return '<b>🛒 Orders</b>\nPick a status:', kb(
-        [btn('📝 Draft', 'ol:d:0'), btn('💳 Confirmed', 'ol:c:0')],
-        [btn('✅ Completed', 'ol:f:0'), btn('❌ Cancelled', 'ol:x:0')],
-        [btn('All', 'ol:a:0'), btn('« Menu', 'm')])
+def screen_orders_menu(t):
+    return f'<b>🛒 {t("Orders")}</b>\n{t("Pick a status:")}', kb(
+        [btn(t('📝 Draft'), 'ol:d:0'), btn(t('💳 Confirmed'), 'ol:c:0')],
+        [btn(t('✅ Completed'), 'ol:f:0'), btn(t('❌ Cancelled'), 'ol:x:0')],
+        [btn(t('All'), 'ol:a:0'), btn(t('« Menu'), 'm')])
 
 
-def screen_orders_list(db, status_code, page):
+def screen_orders_list(db, status_code, page, t):
     status = STATUS_CODES.get(status_code)
     rows, has_more = services.list_orders(db, status=status, page=page, page_size=10)
-    label = STATUS_LABELS.get(status, 'All orders') if status else 'All orders'
+    label = t(STATUS_LABELS[status]) if status in STATUS_LABELS else t('All orders')
     if not rows and page == 0:
-        return f'{label}: nothing here.', kb([btn('« Orders', 'o'), btn('« Menu', 'm')])
+        return t('{label}: nothing here.', label=label), kb([btn(t('« Orders'), 'o'), btn(t('« Menu'), 'm')])
     lines = [f'<b>🛒 {label}</b>']
     buttons = []
     for o in rows:
-        lines.append(f"#{o['id']} — {format_rupiah(o['total_amount'])} — {esc(o['status'])}")
+        lines.append(f"#{o['id']} — {format_rupiah(o['total_amount'])} — {t(o['status'])}")
         buttons.append(btn(f"#{o['id']}", f"od:{o['id']}"))
     # order buttons in rows of 5
     rows_kb = [buttons[i:i + 5] for i in range(0, len(buttons), 5)]
     nav = []
     if page > 0:
-        nav.append(btn('◀ Prev', f'ol:{status_code}:{page - 1}'))
+        nav.append(btn(t('◀ Prev'), f'ol:{status_code}:{page - 1}'))
     if has_more:
-        nav.append(btn('Next ▶', f'ol:{status_code}:{page + 1}'))
+        nav.append(btn(t('Next ▶'), f'ol:{status_code}:{page + 1}'))
     if nav:
         rows_kb.append(nav)
-    rows_kb.append([btn('« Orders', 'o'), btn('« Menu', 'm')])
+    rows_kb.append([btn(t('« Orders'), 'o'), btn(t('« Menu'), 'm')])
     return '\n'.join(lines), kb(*rows_kb)
 
 
-def screen_order_detail(db, order_id):
+def screen_order_detail(db, order_id, t):
     order, items = services.get_order(db, order_id)
-    lines = [f"<b>Order #{order['id']}</b> — {STATUS_LABELS.get(order['status'], esc(order['status']))}"]
+    status_label = t(STATUS_LABELS[order['status']]) if order['status'] in STATUS_LABELS else esc(order['status'])
+    lines = [f"<b>{t('Order #{n}', n=order['id'])}</b> — {status_label}"]
     for i in items:
         lines.append(f"• {esc(i['product_name'])} ×{i['quantity']} = {format_rupiah(i['subtotal'])}")
-    lines.append(f"<b>Total: {format_rupiah(order['total_amount'])}</b>")
+    lines.append(f"<b>{t('Total: {amount}', amount=format_rupiah(order['total_amount']))}</b>")
     actions = []
     if order['status'] == 'draft':
-        actions.append(btn('✅ Confirm payment', f'oc:{order_id}'))
-        actions.append(btn('❌ Cancel', f'ox?:{order_id}'))
+        actions.append(btn(t('✅ Confirm payment'), f'oc:{order_id}'))
+        actions.append(btn(t('❌ Cancel'), f'ox?:{order_id}'))
     elif order['status'] == 'confirmed':
-        actions.append(btn('💰 Complete', f'of?:{order_id}'))
-        actions.append(btn('❌ Cancel', f'ox?:{order_id}'))
+        actions.append(btn(t('💰 Complete'), f'of?:{order_id}'))
+        actions.append(btn(t('❌ Cancel'), f'ox?:{order_id}'))
     rows_kb = [actions] if actions else []
-    rows_kb.append([btn('« Orders', 'o'), btn('« Menu', 'm')])
+    rows_kb.append([btn(t('« Orders'), 'o'), btn(t('« Menu'), 'm')])
     return '\n'.join(lines), kb(*rows_kb)
 
 
-def screen_confirm(question, yes_data, no_data):
-    return question, kb([btn('✅ Yes', yes_data), btn('« No', no_data)])
+def screen_confirm(question, yes_data, no_data, t):
+    return question, kb([btn(t('✅ Yes'), yes_data), btn(t('« No'), no_data)])
 
 
-def screen_summary(db, unit_code, offset, tz):
+def screen_summary(db, unit_code, offset, tz, t):
     unit = UNIT_CODES[unit_code]
     s = services.sales_summary(db, unit, offset, tz)
     start = s['start']
+    lang = t.lang
     if unit == 'day':
-        label = start.strftime('%a %d %b %Y')
+        label = (f'{i18n.weekday_abbr(start.weekday(), lang)} {start.day:02d} '
+                 f'{i18n.month_name(start.month, lang, abbr=True)} {start.year}')
     elif unit == 'week':
-        label = f"Week of {start.strftime('%d %b %Y')}"
+        date = f'{start.day:02d} {i18n.month_name(start.month, lang, abbr=True)} {start.year}'
+        label = t('Week of {date}', date=date)
     elif unit == 'month':
-        label = start.strftime('%B %Y')
+        label = f'{i18n.month_name(start.month, lang)} {start.year}'
     else:
-        label = start.strftime('%Y')
+        label = str(start.year)
     text = '\n'.join([
-        f'<b>📈 Sales — {esc(label)}</b>',
-        f"Revenue: {format_rupiah(s['total_revenue'])}",
-        f"Orders: {s['total_orders']}   Items sold: {s['total_items_sold']}",
-        f"Restock cost: {format_rupiah(s['restock_cost'])}",
-        f"<b>Net profit: {format_rupiah(s['net_profit'])}</b>",
+        f'<b>{t("📈 Sales — {label}", label=esc(label))}</b>',
+        t('Revenue: {amount}', amount=format_rupiah(s['total_revenue'])),
+        t('Orders: {orders}   Items sold: {items}', orders=s['total_orders'], items=s['total_items_sold']),
+        t('Restock cost: {amount}', amount=format_rupiah(s['restock_cost'])),
+        f"<b>{t('Net profit: {amount}', amount=format_rupiah(s['net_profit']))}</b>",
     ])
-    unit_row = [btn(('· ' if c == unit_code else '') + UNIT_LABELS[c], f's:{c}:0')
+    unit_row = [btn(('· ' if c == unit_code else '') + t(UNIT_LABELS[c]), f's:{c}:0')
                 for c in ('d', 'w', 'm', 'y')]
     nav = [btn('◀', f's:{unit_code}:{offset + 1}')]
     if offset > 0:
         nav.append(btn('▶', f's:{unit_code}:{offset - 1}'))
-    nav.append(btn('« Menu', 'm'))
+    nav.append(btn(t('« Menu'), 'm'))
     return text, kb(unit_row, nav)
 
 
@@ -284,45 +289,47 @@ def _cart_lines(db, items):
     return lines
 
 
-def screen_flow_picker(db, flow, items, page):
+def screen_flow_picker(db, flow, items, page, t):
     prefix = 'no' if flow == 'order' else 'r'
-    title = '🆕 New order' if flow == 'order' else '📥 Restock'
+    title = t('🆕 New order') if flow == 'order' else t('📥 Restock')
     rows, has_more = services.list_products(db, page=page, page_size=8)
     lines = [f'<b>{title}</b>']
     if items:
-        lines += ['Selected:'] + _cart_lines(db, items)
-    lines.append('Pick a product:')
+        lines += [t('Selected:')] + _cart_lines(db, items)
+    lines.append(t('Pick a product:'))
     buttons = []
     for p in rows:
         stock = f" ({p['stock_qty']})" if flow == 'order' else ''
         buttons.append([btn(f"{p['name'][:28]}{stock}", f'{prefix}:i:{p["id"]}')])
     nav = []
     if page > 0:
-        nav.append(btn('◀ Prev', f'{prefix}:p:{page - 1}'))
+        nav.append(btn(t('◀ Prev'), f'{prefix}:p:{page - 1}'))
     if has_more:
-        nav.append(btn('Next ▶', f'{prefix}:p:{page + 1}'))
+        nav.append(btn(t('Next ▶'), f'{prefix}:p:{page + 1}'))
     if nav:
         buttons.append(nav)
-    tail = [btn('✔ Done', f'{prefix}:d')] if items else []
-    tail.append(btn('✖ Abandon', f'{prefix}:c'))
+    tail = [btn(t('✔ Done'), f'{prefix}:d')] if items else []
+    tail.append(btn(t('✖ Abandon'), f'{prefix}:c'))
     buttons.append(tail)
     return '\n'.join(lines), {'inline_keyboard': buttons}
 
 
-def screen_flow_qty(db, flow, pid):
+def screen_flow_qty(db, flow, pid, t):
     prefix = 'no' if flow == 'order' else 'r'
     p = db.execute("SELECT * FROM products WHERE id = ?", (pid,)).fetchone()
     name = esc(p['name']) if p else f'#{pid}'
-    text = f'How many <b>{name}</b>?'
+    text = t('How many <b>{name}</b>?', name=name)
     if flow == 'order' and p:
-        text += f" (stock: {p['stock_qty']})"
+        text += t(' (stock: {n})', n=p['stock_qty'])
+    text += '\n' + t('Tap a number, or ✏️ Custom to type any amount.')
     qty_row = [btn(str(n), f'{prefix}:q:{n}') for n in QTY_CHOICES]
-    return text, kb(qty_row[:3], qty_row[3:], [btn('« Back', f'{prefix}:p:0')])
+    return text, kb(qty_row[:3], qty_row[3:],
+                    [btn(t('✏️ Custom'), f'{prefix}:qc'), btn(t('« Back'), f'{prefix}:p:0')])
 
 
-def screen_flow_review(db, flow, state):
+def screen_flow_review(db, flow, state, t):
     prefix = 'no' if flow == 'order' else 'r'
-    title = '🆕 New order — review' if flow == 'order' else '📥 Restock — review'
+    title = t('🆕 New order — review') if flow == 'order' else t('📥 Restock — review')
     lines = [f'<b>{title}</b>'] + _cart_lines(db, state['items'])
     if flow == 'order':
         total = 0
@@ -330,14 +337,15 @@ def screen_flow_review(db, flow, state):
             p = db.execute("SELECT price FROM products WHERE id = ?", (pid,)).fetchone()
             if p:
                 total += p['price'] * qty
-        lines.append(f'<b>Total: {format_rupiah(total)}</b>')
-        action = btn('✅ Create draft order', 'no:!')
+        lines.append(f"<b>{t('Total: {amount}', amount=format_rupiah(total))}</b>")
+        action = btn(t('✅ Create draft order'), 'no:!')
     else:
         cost = state.get('cost')
-        lines.append(f"Total cost: <b>{format_rupiah(cost) if cost is not None else '—'}</b>")
-        action = btn('✅ Save restock', 'r:!')
+        cost_str = format_rupiah(cost) if cost is not None else '—'
+        lines.append(t('Total cost: <b>{cost}</b>', cost=cost_str))
+        action = btn(t('✅ Save restock'), 'r:!')
     return '\n'.join(lines), kb([action],
-                                [btn('+ Add more', f'{prefix}:p:0'), btn('✖ Abandon', f'{prefix}:c')])
+                                [btn(t('+ Add more'), f'{prefix}:p:0'), btn(t('✖ Abandon'), f'{prefix}:c')])
 
 
 def parse_cost(text):
@@ -349,12 +357,25 @@ def parse_cost(text):
     return float(cleaned)
 
 
+def parse_qty(text):
+    """'12', ' 3 ' -> positive int; None when not a positive whole number."""
+    cleaned = text.strip()
+    if not cleaned.isdigit():
+        return None
+    n = int(cleaned)
+    return n if n > 0 else None
+
+
 # --- Update handling ---
 
 _denied_ids = set()  # reply to unauthorized users once per process, not per message
 
 
 def handle_update(api, db, update, whitelist, tz, states):
+    # Language is a shop-wide setting, re-read per update so web-UI changes apply
+    # without restarting the poller (mirrors how config is loaded each cycle).
+    from database import get_setting
+    t = i18n.make_t(i18n.normalize_lang(get_setting(db, 'language', i18n.DEFAULT_LANG)))
     message = update.get('message')
     callback = update.get('callback_query')
     if message and isinstance(message.get('text'), str):
@@ -363,37 +384,55 @@ def handle_update(api, db, update, whitelist, tz, states):
         if sender not in whitelist:
             if sender is not None and sender not in _denied_ids:
                 _denied_ids.add(sender)
-                api.send_message(chat_id, f'Not authorized. Your Telegram ID: <code>{sender}</code>')
+                api.send_message(chat_id, t('Not authorized. Your Telegram ID: <code>{id}</code>', id=sender))
             return
-        _handle_text(api, db, chat_id, message['text'], states)
+        _handle_text(api, db, chat_id, message['text'], states, t)
     elif callback:
         sender = (callback.get('from') or {}).get('id')
         if sender not in whitelist:
-            api.answer_callback_query(callback['id'], 'Not authorized', show_alert=True)
+            api.answer_callback_query(callback['id'], t('Not authorized'), show_alert=True)
             return
-        _handle_callback(api, db, callback, tz, states)
+        _handle_callback(api, db, callback, tz, states, t)
     # other update types are ignored
 
 
-def _handle_text(api, db, chat_id, text, states):
+def _handle_text(api, db, chat_id, text, states, t):
     state = states.get(chat_id)
+    if state and state.get('await_qty'):
+        pid = state.get('pending_pid')
+        if pid is None:  # lost track of which product — bail to the menu
+            states.pop(chat_id)
+            body, markup = screen_main(t)
+            api.send_message(chat_id, body, markup)
+            return
+        qty = parse_qty(text)
+        if qty is None:
+            api.send_message(chat_id, t("Couldn't read that number. Send the quantity as a whole number, e.g. <code>12</code>"))
+            return
+        items = dict(state['items'])
+        items[pid] = items.get(pid, 0) + qty
+        state = dict(state, items=items, pending_pid=None, await_qty=False)
+        states.set(chat_id, state)
+        body, markup = screen_flow_picker(db, state['flow'], items, 0, t)
+        api.send_message(chat_id, body, markup)
+        return
     if state and state.get('await_cost'):
         cost = parse_cost(text)
         if cost is None:
-            api.send_message(chat_id, "Couldn't read that amount. Send the total cost as a number, e.g. <code>150000</code>")
+            api.send_message(chat_id, t("Couldn't read that amount. Send the total cost as a number, e.g. <code>150000</code>"))
             return
         state = dict(state, cost=cost, await_cost=False)
         states.set(chat_id, state)
-        body, markup = screen_flow_review(db, 'restock', state)
+        body, markup = screen_flow_review(db, 'restock', state, t)
         api.send_message(chat_id, body, markup)
         return
     # any other text: reset and show the menu
     states.pop(chat_id)
-    body, markup = screen_main()
+    body, markup = screen_main(t)
     api.send_message(chat_id, body, markup)
 
 
-def _handle_callback(api, db, callback, tz, states):
+def _handle_callback(api, db, callback, tz, states, t):
     data = callback.get('data') or ''
     msg = callback.get('message') or {}
     chat_id = (msg.get('chat') or {}).get('id')
@@ -409,50 +448,50 @@ def _handle_callback(api, db, callback, tz, states):
     try:
         if data == 'm':
             states.pop(chat_id)
-            show(*screen_main())
+            show(*screen_main(t))
         elif data == 'noop':
             pass
         elif parts[0] == 'p':
-            show(*screen_products(db, int(parts[1])))
+            show(*screen_products(db, int(parts[1]), t))
         elif data == 'o':
-            show(*screen_orders_menu())
+            show(*screen_orders_menu(t))
         elif parts[0] == 'ol':
-            show(*screen_orders_list(db, parts[1], int(parts[2])))
+            show(*screen_orders_list(db, parts[1], int(parts[2]), t))
         elif parts[0] == 'od':
-            show(*screen_order_detail(db, int(parts[1])))
+            show(*screen_order_detail(db, int(parts[1]), t))
         elif parts[0] == 'oc':
             services.confirm_order(db, int(parts[1]))
-            ack('Payment confirmed')
-            show(*screen_order_detail(db, int(parts[1])))
+            ack(t('Payment confirmed'))
+            show(*screen_order_detail(db, int(parts[1]), t))
         elif parts[0] == 'of?':
-            show(*screen_confirm(f'Complete order #{parts[1]}? Stock will be deducted.',
-                                 f'of!:{parts[1]}', f'od:{parts[1]}'))
+            show(*screen_confirm(t('Complete order #{id}? Stock will be deducted.', id=parts[1]),
+                                 f'of!:{parts[1]}', f'od:{parts[1]}', t))
         elif parts[0] == 'of!':
             services.complete_order(db, int(parts[1]))
-            ack('Order completed')
-            show(*screen_order_detail(db, int(parts[1])))
+            ack(t('Order completed'))
+            show(*screen_order_detail(db, int(parts[1]), t))
         elif parts[0] == 'ox?':
-            show(*screen_confirm(f'Cancel order #{parts[1]}?',
-                                 f'ox!:{parts[1]}', f'od:{parts[1]}'))
+            show(*screen_confirm(t('Cancel order #{id}?', id=parts[1]),
+                                 f'ox!:{parts[1]}', f'od:{parts[1]}', t))
         elif parts[0] == 'ox!':
             services.cancel_order(db, int(parts[1]))
-            ack('Order cancelled')
-            show(*screen_order_detail(db, int(parts[1])))
+            ack(t('Order cancelled'))
+            show(*screen_order_detail(db, int(parts[1]), t))
         elif parts[0] == 's':
             offset = max(0, int(parts[2]))
-            show(*screen_summary(db, parts[1], offset, tz))
+            show(*screen_summary(db, parts[1], offset, tz, t))
         elif parts[0] in ('no', 'r'):
-            _handle_flow_callback(api, db, callback, parts, states, show, ack)
+            _handle_flow_callback(api, db, callback, parts, states, show, ack, t)
             return  # flow handler does its own ack
         else:
             ack()
             return
         ack()
     except ServiceError as e:
-        ack(str(e), alert=True)
+        ack(i18n.translate_error(e, t), alert=True)
 
 
-def _handle_flow_callback(api, db, callback, parts, states, show, ack):
+def _handle_flow_callback(api, db, callback, parts, states, show, ack, t):
     chat_id = ((callback.get('message') or {}).get('chat') or {}).get('id')
     prefix = parts[0]
     flow = 'order' if prefix == 'no' else 'restock'
@@ -460,78 +499,90 @@ def _handle_flow_callback(api, db, callback, parts, states, show, ack):
     state = states.get(chat_id)
 
     if sub is None:  # flow entry: 'no' or 'r'
-        state = {'flow': flow, 'items': {}, 'pending_pid': None}
+        state = {'flow': flow, 'items': {}, 'pending_pid': None, 'await_qty': False}
         if flow == 'restock':
             state.update(await_cost=False, cost=None)
         states.set(chat_id, state)
-        show(*screen_flow_picker(db, flow, {}, 0))
+        show(*screen_flow_picker(db, flow, {}, 0, t))
         ack()
         return
 
     if sub == 'c':  # abandon
         states.pop(chat_id)
-        show(*screen_main())
-        ack('Abandoned')
+        show(*screen_main(t))
+        ack(t('Abandoned'))
         return
 
     if not state or state.get('flow') != flow:
-        ack('Session expired — start again from the menu', alert=True)
-        show(*screen_main())
+        ack(t('Session expired — start again from the menu'), alert=True)
+        show(*screen_main(t))
         return
 
     try:
         if sub == 'p':
-            show(*screen_flow_picker(db, flow, state['items'], int(parts[2])))
+            states.set(chat_id, dict(state, pending_pid=None, await_qty=False))
+            show(*screen_flow_picker(db, flow, state['items'], int(parts[2]), t))
             ack()
         elif sub == 'i':
             pid = int(parts[2])
-            states.set(chat_id, dict(state, pending_pid=pid))
-            show(*screen_flow_qty(db, flow, pid))
+            states.set(chat_id, dict(state, pending_pid=pid, await_qty=False))
+            show(*screen_flow_qty(db, flow, pid, t))
             ack()
         elif sub == 'q':
             pid = state.get('pending_pid')
             if pid is None:
-                ack('Session expired — start again from the menu', alert=True)
-                show(*screen_main())
+                ack(t('Session expired — start again from the menu'), alert=True)
+                show(*screen_main(t))
                 return
             items = dict(state['items'])
             items[pid] = items.get(pid, 0) + int(parts[2])
-            states.set(chat_id, dict(state, items=items, pending_pid=None))
-            show(*screen_flow_picker(db, flow, items, 0))
-            ack('Added')
+            states.set(chat_id, dict(state, items=items, pending_pid=None, await_qty=False))
+            show(*screen_flow_picker(db, flow, items, 0, t))
+            ack(t('Added'))
+        elif sub == 'qc':  # user wants to type a custom quantity
+            pid = state.get('pending_pid')
+            if pid is None:
+                ack(t('Session expired — start again from the menu'), alert=True)
+                show(*screen_main(t))
+                return
+            states.set(chat_id, dict(state, await_qty=True))
+            api.send_message(chat_id, t('Send the <b>quantity</b> as a number, e.g. <code>12</code>'))
+            ack()
         elif sub == 'd':
             if not state['items']:
-                ack('Nothing selected yet', alert=True)
+                ack(t('Nothing selected yet'), alert=True)
                 return
             if flow == 'order':
-                show(*screen_flow_review(db, 'order', state))
+                show(*screen_flow_review(db, 'order', state, t))
                 ack()
             else:
                 states.set(chat_id, dict(state, await_cost=True))
-                api.send_message(chat_id, 'Send the <b>total cost</b> of this restock as a message, e.g. <code>150000</code>')
+                api.send_message(chat_id, t('Send the <b>total cost</b> of this restock as a message, e.g. <code>150000</code>'))
                 ack()
         elif sub == '!':
             if flow == 'order':
                 items = [{'product_id': pid, 'quantity': qty} for pid, qty in state['items'].items()]
                 result = services.create_order(db, items)
                 states.pop(chat_id)
-                show(f"✅ Draft order <b>#{result['order_id']}</b> created — total {format_rupiah(result['total'])}",
-                     kb([btn('View order', f"od:{result['order_id']}")], [btn('« Menu', 'm')]))
-                ack('Order created')
+                show(t('✅ Draft order <b>#{id}</b> created — total {total}',
+                       id=result['order_id'], total=format_rupiah(result['total'])),
+                     kb([btn(t('View order'), f"od:{result['order_id']}")], [btn(t('« Menu'), 'm')]))
+                ack(t('Order created'))
             else:
                 if state.get('cost') is None:
-                    ack('Send the total cost first', alert=True)
+                    ack(t('Send the total cost first'), alert=True)
                     return
                 items = [{'product_id': pid, 'qty': qty} for pid, qty in state['items'].items()]
                 batch_id = services.create_restock(db, items, state['cost'])
                 states.pop(chat_id)
-                show(f'✅ Restock batch <b>#{batch_id}</b> saved — {format_rupiah(state["cost"])}',
-                     kb([btn('« Menu', 'm')]))
-                ack('Restock saved')
+                show(t('✅ Restock batch <b>#{id}</b> saved — {cost}',
+                       id=batch_id, cost=format_rupiah(state["cost"])),
+                     kb([btn(t('« Menu'), 'm')]))
+                ack(t('Restock saved'))
         else:
             ack()
     except ServiceError as e:
-        ack(str(e), alert=True)
+        ack(i18n.translate_error(e, t), alert=True)
 
 
 # --- Poller ---

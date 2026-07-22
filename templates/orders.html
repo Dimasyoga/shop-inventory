@@ -1,25 +1,25 @@
 {% extends "base.html" %}
-{% block title %}Orders{% endblock %}
+{% block title %}{{ t('Orders') }}{% endblock %}
 {% block content %}
 <div class="page-header">
-    <h2>Orders</h2>
-    <button class="btn btn-primary" onclick="openOrderModal()">+ New Order</button>
+    <h2>{{ t('Orders') }}</h2>
+    <button class="btn btn-primary" onclick="openOrderModal()">{{ t('+ New Order') }}</button>
 </div>
 
 <div class="card">
     <div class="table-controls">
-        <input type="text" id="searchOrder" class="search-input" placeholder="Search by Order ID..." oninput="loadOrders()">
+        <input type="text" id="searchOrder" class="search-input" placeholder="{{ t('Search by Order ID...') }}" oninput="loadOrders()">
         <select id="filterStatus" onchange="loadOrders()">
-            <option value="">All Status</option>
-            <option value="draft">Draft</option>
-            <option value="confirmed">Payment Confirmed</option>
-            <option value="completed">Completed</option>
-            <option value="cancelled">Cancelled</option>
+            <option value="">{{ t('All Status') }}</option>
+            <option value="draft">{{ t('Draft') }}</option>
+            <option value="confirmed">{{ t('Payment Confirmed') }}</option>
+            <option value="completed">{{ t('Completed') }}</option>
+            <option value="cancelled">{{ t('Cancelled') }}</option>
         </select>
     </div>
     <table class="data-table">
         <thead>
-            <tr><th>Order ID</th><th>Date</th><th>Items</th><th>Total</th><th>Status</th><th>Actions</th></tr>
+            <tr><th>{{ t('Order ID') }}</th><th>{{ t('Date') }}</th><th>{{ t('Items') }}</th><th>{{ t('Total') }}</th><th>{{ t('Status') }}</th><th>{{ t('Actions') }}</th></tr>
         </thead>
         <tbody id="ordersBody">
         </tbody>
@@ -30,17 +30,17 @@
 <div class="modal" id="orderModal">
     <div class="modal-content" style="max-width: 600px">
         <div class="modal-header">
-            <h3>New Order</h3>
+            <h3>{{ t('New Order') }}</h3>
             <span class="modal-close" onclick="closeOrderModal()">&times;</span>
         </div>
         <div id="orderItems" style="margin-bottom:16px"></div>
-        <button class="btn btn-secondary" onclick="addOrderItem()" style="margin-bottom:16px">+ Add Item</button>
+        <button class="btn btn-secondary" onclick="addOrderItem()" style="margin-bottom:16px">{{ t('+ Add Item') }}</button>
         <div style="text-align:right;font-size:18px;font-weight:700;margin-bottom:16px">
-            Total: <span id="orderTotal">Rp 0</span>
+            {{ t('Total') }}: <span id="orderTotal">Rp 0</span>
         </div>
         <div class="modal-actions">
-            <button type="button" class="btn btn-secondary" onclick="closeOrderModal()">Cancel</button>
-            <button type="button" class="btn btn-primary" onclick="createOrder()">Create Order</button>
+            <button type="button" class="btn btn-secondary" onclick="closeOrderModal()">{{ t('Cancel') }}</button>
+            <button type="button" class="btn btn-primary" onclick="createOrder()">{{ t('Create Order') }}</button>
         </div>
     </div>
 </div>
@@ -49,7 +49,7 @@
 <div class="modal" id="orderDetailModal">
     <div class="modal-content" style="max-width: 600px">
         <div class="modal-header">
-            <h3 id="detailOrderId">Order ID</h3>
+            <h3 id="detailOrderId">{{ t('Order ID') }}</h3>
             <span class="modal-close" onclick="closeOrderDetail()">&times;</span>
         </div>
         <div id="orderDetailContent"></div>

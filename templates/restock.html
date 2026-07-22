@@ -1,42 +1,42 @@
 {% extends "base.html" %}
-{% block title %}Restock{% endblock %}
+{% block title %}{{ t('Restock') }}{% endblock %}
 {% block content %}
 <div class="page-header">
-    <h2>Restock</h2>
+    <h2>{{ t('Restock') }}</h2>
 </div>
 
 <div class="card">
-    <h3>New Restock</h3>
+    <h3>{{ t('New Restock') }}</h3>
     <div class="restock-header-row">
-        <div class="form-group"><label>Product</label></div>
-        <div class="form-group"><label>Quantity</label></div>
+        <div class="form-group"><label>{{ t('Product') }}</label></div>
+        <div class="form-group"><label>{{ t('Quantity') }}</label></div>
         <div class="form-group"><label>&nbsp;</label></div>
     </div>
     <div id="restockItems"></div>
-    <button class="btn btn-secondary" onclick="addRestockItem()" style="margin-bottom:16px">+ Add Product</button>
+    <button class="btn btn-secondary" onclick="addRestockItem()" style="margin-bottom:16px">{{ t('+ Add Product') }}</button>
     <div class="form-group" style="margin-top:12px">
-        <label>Total Restock Cost</label>
-        <input type="number" id="restockTotalCostInput" min="0" value="0" placeholder="Total cost for this batch" style="width:200px">
+        <label>{{ t('Total Restock Cost') }}</label>
+        <input type="number" id="restockTotalCostInput" min="0" value="0" placeholder="{{ t('Total cost for this batch') }}" style="width:200px">
     </div>
     <div class="modal-actions">
-        <button type="button" class="btn btn-primary" onclick="submitRestock()">Submit Restock</button>
+        <button type="button" class="btn btn-primary" onclick="submitRestock()">{{ t('Submit Restock') }}</button>
     </div>
 </div>
 
 <div class="card">
-    <h3>Restock History</h3>
+    <h3>{{ t('Restock History') }}</h3>
     <div class="period-selector" style="margin-bottom:16px">
-        <button class="btn btn-period active" data-period="all">All Time</button>
-        <button class="btn btn-period" data-period="today">Today</button>
-        <button class="btn btn-period" data-period="week">This Week</button>
-        <button class="btn btn-period" data-period="month">This Month</button>
+        <button class="btn btn-period active" data-period="all">{{ t('All Time') }}</button>
+        <button class="btn btn-period" data-period="today">{{ t('Today') }}</button>
+        <button class="btn btn-period" data-period="week">{{ t('This Week') }}</button>
+        <button class="btn btn-period" data-period="month">{{ t('This Month') }}</button>
     </div>
     <table class="data-table">
         <thead>
-            <tr><th>Batch</th><th>Products</th><th>Total Cost</th><th>Date</th></tr>
+            <tr><th>{{ t('Batch') }}</th><th>{{ t('Products') }}</th><th>{{ t('Total Cost') }}</th><th>{{ t('Date') }}</th></tr>
         </thead>
         <tbody id="restockHistoryBody">
-            <tr><td colspan="4" class="empty-row">No restock history yet</td></tr>
+            <tr><td colspan="4" class="empty-row">{{ t('No restock history yet') }}</td></tr>
         </tbody>
     </table>
 </div>

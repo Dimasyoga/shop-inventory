@@ -145,3 +145,59 @@ def test_account_short_password_rejected(client):
 def test_account_nothing_to_change(client):
     res = client.post("/api/settings/account", json={"current_password": "admin123"})
     assert res.status_code == 400
+
+
+# --- Language ---
+
+def test_language_defaults_to_english(client):
+    # No setting stored yet: the picker shows English selected and English labels.
+    html = client.get("/settings").get_data(as_text=True)
+    assert 'value="en" selected' in html
+    assert "Settings" in html and "Pengaturan" not in html
+
+
+def test_language_round_trip_and_rerender(client):
+    res = client.post("/api/settings/language", json={"language": "id"})
+    assert res.status_code == 200
+    assert get_setting("language") == "id"
+    # Subsequent renders come back translated.
+    html = client.get("/settings").get_data(as_text=True)
+    assert 'value="id" selected' in html
+    assert "Pengaturan" in html  # "Settings" heading, translated
+
+
+def test_language_switch_translates_dashboard(client):
+    client.post("/api/settings/language", json={"language": "id"})
+    html = client.get("/").get_data(as_text=True)
+    assert "Dasbor" in html          # nav + header
+    assert "Total Produk" in html    # a stat label
+    assert 'lang="id"' in html
+
+
+def test_unsupported_language_rejected(client):
+    res = client.post("/api/settings/language", json={"language": "fr"})
+    assert res.status_code == 400
+    assert get_setting("language") is None  # nothing persisted
+
+
+def test_login_page_respects_language(client, db_path):
+    # Set language while logged in, then hit the (logged-out) login page.
+    client.post("/api/settings/language", json={"language": "id"})
+    import app as app_module
+    with app_module.app.test_client() as c:
+        html = c.get("/login").get_data(as_text=True)
+    assert "Masuk untuk mengelola toko Anda" in html
+
+
+def test_service_error_translated_in_api_english(client):
+    # Ordering a nonexistent product raises NotFoundError -> translated to English (identity).
+    res = client.post("/api/orders", json={"items": [{"product_id": 999, "quantity": 1}]})
+    assert res.status_code == 404
+    assert res.get_json()["error"] == "Product 999 not found"
+
+
+def test_service_error_translated_in_api_indonesian(client):
+    client.post("/api/settings/language", json={"language": "id"})
+    res = client.post("/api/orders", json={"items": [{"product_id": 999, "quantity": 1}]})
+    assert res.status_code == 404
+    assert res.get_json()["error"] == "Produk 999 tidak ditemukan"

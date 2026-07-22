@@ -1,22 +1,22 @@
 {% extends "base.html" %}
-{% block title %}Sales Dashboard{% endblock %}
+{% block title %}{{ t('Sales Dashboard') }}{% endblock %}
 {% block content %}
 <div class="page-header">
-    <h2>Sales Dashboard</h2>
+    <h2>{{ t('Sales Dashboard') }}</h2>
 </div>
 
 <div class="time-navigator">
     <div class="time-unit-selector">
-        <button class="btn btn-unit" data-unit="day">Day</button>
-        <button class="btn btn-unit" data-unit="week">Week</button>
-        <button class="btn btn-unit active" data-unit="month">Month</button>
-        <button class="btn btn-unit" data-unit="year">Year</button>
+        <button class="btn btn-unit" data-unit="day">{{ t('Day') }}</button>
+        <button class="btn btn-unit" data-unit="week">{{ t('Week') }}</button>
+        <button class="btn btn-unit active" data-unit="month">{{ t('Month') }}</button>
+        <button class="btn btn-unit" data-unit="year">{{ t('Year') }}</button>
     </div>
     <div class="time-controls">
         <button class="btn btn-nav" id="prevPeriod">◀</button>
         <span class="time-label" id="timeLabel"></span>
         <button class="btn btn-nav" id="nextPeriod">▶</button>
-        <button class="btn btn-reset" id="resetPeriod">Reset</button>
+        <button class="btn btn-reset" id="resetPeriod">{{ t('Reset') }}</button>
     </div>
 </div>
 
@@ -25,28 +25,28 @@
         <div class="stat-icon">&#128176;</div>
         <div class="stat-info">
             <div class="stat-value" id="stat-revenue">Rp 0</div>
-            <div class="stat-label">Total Revenue</div>
+            <div class="stat-label">{{ t('Total Revenue') }}</div>
         </div>
     </div>
     <div class="stat-card">
         <div class="stat-icon">&#128722;</div>
         <div class="stat-info">
             <div class="stat-value" id="stat-orders">0</div>
-            <div class="stat-label">Completed Orders</div>
+            <div class="stat-label">{{ t('Completed Orders') }}</div>
         </div>
     </div>
     <div class="stat-card">
         <div class="stat-icon">&#128230;</div>
         <div class="stat-info">
             <div class="stat-value" id="stat-skus">0</div>
-            <div class="stat-label">Unique SKUs Sold</div>
+            <div class="stat-label">{{ t('Unique SKUs Sold') }}</div>
         </div>
     </div>
     <div class="stat-card">
         <div class="stat-icon">&#128063;</div>
         <div class="stat-info">
             <div class="stat-value" id="stat-items">0</div>
-            <div class="stat-label">Total Items Sold</div>
+            <div class="stat-label">{{ t('Total Items Sold') }}</div>
         </div>
     </div>
 </div>
@@ -56,27 +56,27 @@
         <div class="stat-icon">&#128203;</div>
         <div class="stat-info">
             <div class="stat-value" id="stat-restock-cost">Rp 0</div>
-            <div class="stat-label">Restock Cost</div>
+            <div class="stat-label">{{ t('Restock Cost') }}</div>
         </div>
     </div>
     <div class="stat-card">
         <div class="stat-icon">&#128176;</div>
         <div class="stat-info">
             <div class="stat-value" id="stat-net-profit">Rp 0</div>
-            <div class="stat-label">Net Profit</div>
+            <div class="stat-label">{{ t('Net Profit') }}</div>
         </div>
     </div>
     <div class="stat-card">
         <div class="stat-icon">&#127970;</div>
         <div class="stat-info">
             <div class="stat-value" id="stat-product-value">Rp 0</div>
-            <div class="stat-label">Total Product Sale Value</div>
+            <div class="stat-label">{{ t('Total Product Sale Value') }}</div>
         </div>
     </div>
 </div>
 
 <div class="card">
-    <h3>Sales Trend</h3>
+    <h3>{{ t('Sales Trend') }}</h3>
     <div class="chart-container">
         <canvas id="trendChart"></canvas>
     </div>
@@ -84,24 +84,24 @@
 
 <div class="grid-2">
     <div class="card">
-        <h3>Top 3 Sellers</h3>
+        <h3>{{ t('Top 3 Sellers') }}</h3>
         <table class="data-table">
             <thead>
-                <tr><th>Product</th><th>SKU</th><th>Qty Sold</th><th>Revenue</th></tr>
+                <tr><th>{{ t('Product') }}</th><th>{{ t('SKU') }}</th><th>{{ t('Qty Sold') }}</th><th>{{ t('Revenue') }}</th></tr>
             </thead>
             <tbody id="top-sellers-body">
-                <tr><td colspan="4" class="empty-row">No data yet</td></tr>
+                <tr><td colspan="4" class="empty-row">{{ t('No data yet') }}</td></tr>
             </tbody>
         </table>
     </div>
     <div class="card">
-        <h3>Bottom 3 Sellers</h3>
+        <h3>{{ t('Bottom 3 Sellers') }}</h3>
         <table class="data-table">
             <thead>
-                <tr><th>Product</th><th>SKU</th><th>Qty Sold</th><th>Revenue</th></tr>
+                <tr><th>{{ t('Product') }}</th><th>{{ t('SKU') }}</th><th>{{ t('Qty Sold') }}</th><th>{{ t('Revenue') }}</th></tr>
             </thead>
             <tbody id="bottom-sellers-body">
-                <tr><td colspan="4" class="empty-row">No data yet</td></tr>
+                <tr><td colspan="4" class="empty-row">{{ t('No data yet') }}</td></tr>
             </tbody>
         </table>
     </div>

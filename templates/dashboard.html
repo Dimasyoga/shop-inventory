@@ -1,8 +1,8 @@
 {% extends "base.html" %}
-{% block title %}Dashboard{% endblock %}
+{% block title %}{{ t('Dashboard') }}{% endblock %}
 {% block content %}
 <div class="page-header">
-    <h2>Dashboard</h2>
+    <h2>{{ t('Dashboard') }}</h2>
 </div>
 
 <div class="stats-grid">
@@ -10,28 +10,28 @@
         <div class="stat-icon">📦</div>
         <div class="stat-info">
             <div class="stat-value">{{ total_products }}</div>
-            <div class="stat-label">Total Products</div>
+            <div class="stat-label">{{ t('Total Products') }}</div>
         </div>
     </div>
     <div class="stat-card">
         <div class="stat-icon">🛒</div>
         <div class="stat-info">
             <div class="stat-value">{{ total_orders }}</div>
-            <div class="stat-label">Total Orders</div>
+            <div class="stat-label">{{ t('Total Orders') }}</div>
         </div>
     </div>
     <div class="stat-card">
         <div class="stat-icon">⚠️</div>
         <div class="stat-info">
             <div class="stat-value">{{ low_stock_count }}</div>
-            <div class="stat-label">Low Stock</div>
+            <div class="stat-label">{{ t('Low Stock') }}</div>
         </div>
     </div>
     <div class="stat-card">
         <div class="stat-icon">💰</div>
         <div class="stat-info">
             <div class="stat-value">{{ month_revenue }}</div>
-            <div class="stat-label">This Month's Revenue</div>
+            <div class="stat-label">{{ t("This Month's Revenue") }}</div>
         </div>
     </div>
 </div>
@@ -41,51 +41,51 @@
         <div class="stat-icon">📊</div>
         <div class="stat-info">
             <div class="stat-value">{{ net_profit }}</div>
-            <div class="stat-label">Net Profit (This Month)</div>
+            <div class="stat-label">{{ t('Net Profit (This Month)') }}</div>
         </div>
     </div>
     <div class="stat-card">
         <div class="stat-icon">🏪</div>
         <div class="stat-info">
             <div class="stat-value">{{ total_product_value }}</div>
-            <div class="stat-label">Total Product Sale Value</div>
+            <div class="stat-label">{{ t('Total Product Sale Value') }}</div>
         </div>
     </div>
     <div class="stat-card">
         <div class="stat-icon">📥</div>
         <div class="stat-info">
             <div class="stat-value">{{ format_rupiah(total_restock_cost_raw) }}</div>
-            <div class="stat-label">Restock Cost (This Month)</div>
+            <div class="stat-label">{{ t('Restock Cost (This Month)') }}</div>
         </div>
     </div>
 </div>
 
 <div class="grid-2">
     <div class="card">
-        <h3>Recent Orders</h3>
+        <h3>{{ t('Recent Orders') }}</h3>
         <table class="data-table">
             <thead>
-                <tr><th>#</th><th>Status</th><th>Total</th><th>Date</th></tr>
+                <tr><th>#</th><th>{{ t('Status') }}</th><th>{{ t('Total') }}</th><th>{{ t('Date') }}</th></tr>
             </thead>
             <tbody>
                 {% for order in recent_orders %}
                 <tr>
-                    <td>Order #{{ order['id'] }}</td>
-                    <td><span class="badge badge-{{ order['status'] }}">{{ 'Payment Confirmed' if order['status'] == 'confirmed' else order['status'] }}</span></td>
+                    <td>{{ t('Order #{n}', n=order['id']) }}</td>
+                    <td><span class="badge badge-{{ order['status'] }}">{{ t('Payment Confirmed') if order['status'] == 'confirmed' else t(order['status']) }}</span></td>
                     <td>{{ format_rupiah(order['total_amount']) }}</td>
                     <td>{{ order['created_at'] | format_datetime }}</td>
                 </tr>
                 {% else %}
-                <tr><td colspan="4" class="empty-row">No orders yet</td></tr>
+                <tr><td colspan="4" class="empty-row">{{ t('No orders yet') }}</td></tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
     <div class="card">
-        <h3>Low Stock Alerts</h3>
+        <h3>{{ t('Low Stock Alerts') }}</h3>
         <table class="data-table">
             <thead>
-                <tr><th>Product</th><th>Stock</th><th>Threshold</th></tr>
+                <tr><th>{{ t('Product') }}</th><th>{{ t('Stock') }}</th><th>{{ t('Threshold') }}</th></tr>
             </thead>
             <tbody>
                 {% for p in low_stock_products %}
@@ -95,7 +95,7 @@
                     <td>{{ p['reorder_threshold'] }}</td>
                 </tr>
                 {% else %}
-                <tr><td colspan="3" class="empty-row">All stock levels OK</td></tr>
+                <tr><td colspan="3" class="empty-row">{{ t('All stock levels OK') }}</td></tr>
                 {% endfor %}
             </tbody>
         </table>

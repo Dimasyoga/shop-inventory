@@ -8,6 +8,7 @@ import sqlite3
 import os
 import secrets
 
+import i18n
 import services
 from services import (ServiceError, format_rupiah, get_date_range,
                       build_date_filter, _to_utc_str)
@@ -100,6 +101,27 @@ def close_db(exc):
     if db is not None:
         db.close()
 
+def get_lang():
+    """Active shop-wide UI language, resolved to a supported code."""
+    from database import get_setting
+    return i18n.normalize_lang(get_setting(g.db, 'language', i18n.DEFAULT_LANG))
+
+def _service_error(e):
+    """JSON response for a ServiceError, translated to the active language."""
+    return jsonify({'error': i18n.translate_error(e, i18n.make_t(get_lang()))}), e.status
+
+@app.context_processor
+def inject_i18n():
+    """Make the translator and language metadata available to every template
+    (including login, which renders before a session exists)."""
+    lang = get_lang()
+    return {
+        't': i18n.make_t(lang),
+        'lang': lang,
+        'languages': i18n.LANGUAGES,
+        'i18n_js': i18n.js_table(lang),
+    }
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if 'user_id' in session:
@@ -113,7 +135,7 @@ def login():
             session['user_id'] = user['id']
             session['username'] = user['username']
             return redirect(url_for('dashboard'))
-        return render_template('login.html', error='Invalid credentials')
+        return render_template('login.html', error=i18n.make_t(get_lang())('Invalid credentials'))
     return render_template('login.html', error=None)
 
 @app.route('/logout')
@@ -408,7 +430,7 @@ def api_create_order():
     try:
         result = services.create_order(g.db, items)
     except ServiceError as e:
-        return jsonify({'error': str(e)}), e.status
+        return _service_error(e)
     return jsonify({'success': True, 'order_id': result['order_id'], 'total': result['total']})
 
 @app.route('/api/orders/<int:id>/confirm', methods=['POST'])
@@ -417,7 +439,7 @@ def api_confirm_order(id):
     try:
         services.confirm_order(g.db, id)
     except ServiceError as e:
-        return jsonify({'error': str(e)}), e.status
+        return _service_error(e)
     return jsonify({'success': True})
 
 @app.route('/api/orders/<int:id>/complete', methods=['POST'])
@@ -426,7 +448,7 @@ def api_complete_order(id):
     try:
         services.complete_order(g.db, id)
     except ServiceError as e:
-        return jsonify({'error': str(e)}), e.status
+        return _service_error(e)
     return jsonify({'success': True})
 
 @app.route('/api/orders/<int:id>/cancel', methods=['POST'])
@@ -435,7 +457,7 @@ def api_cancel_order(id):
     try:
         services.cancel_order(g.db, id)
     except ServiceError as e:
-        return jsonify({'error': str(e)}), e.status
+        return _service_error(e)
     return jsonify({'success': True})
 
 # --- Restock ---
@@ -468,7 +490,7 @@ def api_restock():
     try:
         services.create_restock(g.db, validated, batch_total_cost)
     except ServiceError as e:
-        return jsonify({'error': str(e)}), e.status
+        return _service_error(e)
     return jsonify({'success': True, 'total_cost': batch_total_cost})
 
 @app.route('/api/restock/history', methods=['GET'])
@@ -527,7 +549,22 @@ def settings_page():
         token_set=bool(get_setting(g.db, 'telegram_bot_token', '')),
         whitelist=get_setting(g.db, 'telegram_whitelist', ''),
         shop_timezone=get_setting(g.db, 'shop_timezone', 'Asia/Jakarta'),
+        current_lang=get_lang(),
         username=session.get('username', ''))
+
+@app.route('/api/settings/language', methods=['POST'])
+@login_required
+def api_settings_language():
+    from database import set_setting
+    data = _json_body()
+    if data is None:
+        return jsonify({'error': 'Invalid JSON body'}), 400
+    lang = data.get('language')
+    if lang not in i18n.LANGUAGES:
+        return jsonify({'error': 'Unsupported language'}), 400
+    set_setting(g.db, 'language', lang)
+    g.db.commit()
+    return jsonify({'success': True})
 
 @app.route('/api/settings/telegram', methods=['POST'])
 @login_required
@@ -650,7 +687,7 @@ def api_sales_summary():
     try:
         summary = services.sales_summary(g.db, unit, offset, tz)
     except ServiceError as e:
-        return jsonify({'error': str(e)}), e.status
+        return _service_error(e)
     return jsonify({k: summary[k] for k in (
         'total_revenue', 'total_orders', 'unique_skus',
         'total_items_sold', 'restock_cost', 'net_profit')})

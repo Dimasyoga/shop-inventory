@@ -9,7 +9,18 @@ from datetime import datetime, timedelta, timezone, date, time as dtime
 
 
 class ServiceError(Exception):
+    """A business-rule violation surfaced to the user.
+
+    The message is stored as an English template plus its ``str.format`` params
+    so display sites can translate it (see ``i18n.translate_error``). ``str(e)``
+    still renders the English message, keeping logging and non-UI callers simple.
+    """
     status = 400
+
+    def __init__(self, template, **params):
+        self.template = template
+        self.params = params
+        super().__init__(template.format(**params) if params else template)
 
 
 class NotFoundError(ServiceError):
@@ -121,9 +132,9 @@ def create_order(db, items):
     for item in items:
         product = db.execute("SELECT * FROM products WHERE id = ?", (item['product_id'],)).fetchone()
         if not product:
-            raise NotFoundError(f"Product {item['product_id']} not found")
+            raise NotFoundError('Product {id} not found', id=item['product_id'])
         if product['stock_qty'] < item['quantity']:
-            raise ServiceError(f"Insufficient stock for {product['name']}")
+            raise ServiceError('Insufficient stock for {name}', name=product['name'])
         subtotal = product['price'] * item['quantity']
         total += subtotal
         rows.append((item['product_id'], item['quantity'], product['price'], subtotal))
@@ -164,7 +175,7 @@ def complete_order(db, order_id):
             (item['quantity'], item['product_id'], item['quantity']))
         if cur.rowcount == 0:
             db.rollback()
-            raise ServiceError(f"Insufficient stock for product #{item['product_id']}")
+            raise ServiceError('Insufficient stock for product #{id}', id=item['product_id'])
         db.execute("INSERT INTO stock_logs (product_id, change_qty, reason) VALUES (?, ?, ?)",
                    (item['product_id'], -item['quantity'], f'sale order #{order_id}'))
     db.execute("UPDATE orders SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (order_id,))
@@ -191,7 +202,7 @@ def create_restock(db, items, total_cost):
     for item in items:
         product = db.execute("SELECT * FROM products WHERE id = ?", (item['product_id'],)).fetchone()
         if not product:
-            raise NotFoundError(f"Product {item['product_id']} not found")
+            raise NotFoundError('Product {id} not found', id=item['product_id'])
         total_qty += item['qty']
 
     cur = db.execute("INSERT INTO restock_batches (total_cost) VALUES (?)", (total_cost,))
@@ -204,7 +215,7 @@ def create_restock(db, items, total_cost):
             (qty_added, item['product_id']))
         if cur.rowcount == 0:
             db.rollback()
-            raise NotFoundError(f"Product {item['product_id']} not found")
+            raise NotFoundError('Product {id} not found', id=item['product_id'])
         db.execute("INSERT INTO restock_items (batch_id, product_id, qty_added, allocated_cost) VALUES (?, ?, ?, ?)",
                    (batch_id, item['product_id'], qty_added, allocated_cost))
         db.execute("INSERT INTO stock_logs (product_id, change_qty, reason) VALUES (?, ?, ?)",
