@@ -1,3 +1,13 @@
+/* ===== i18n ===== */
+/* window.I18N (source string -> translation) and window.LANG are injected by
+   base.html. Missing keys fall back to the source string. Placeholders use the
+   same {name} tokens as the server-side translator. */
+function t(source, params) {
+    let out = (window.I18N && window.I18N[source]) || source;
+    if (params) out = out.replace(/\{(\w+)\}/g, (m, k) => (params[k] != null ? params[k] : m));
+    return out;
+}
+
 /* ===== Utility Functions ===== */
 function formatRupiah(amount) {
     const sign = amount < 0 ? '-' : '';
@@ -16,6 +26,8 @@ function showToast(msg, type = 'success') {
 }
 
 const CLIENT_TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
+/* BCP-47 locale for date labels, derived from the UI language (window.LANG). */
+const DATE_LOCALE = window.LANG === 'id' ? 'id-ID' : 'en-US';
 
 /* User-entered text (product names, SKUs, ...) must be escaped before being
    interpolated into innerHTML, or it executes as markup. */
@@ -49,6 +61,16 @@ function fetchJson(url) {
 }
 
 /* ===== Settings ===== */
+function saveLanguage(e) {
+    e.preventDefault();
+    api('/api/settings/language', 'POST', {
+        language: document.getElementById('uiLanguage').value
+    }).then(() => {
+        // Reload so the server re-renders every string in the new language.
+        location.reload();
+    }).catch(err => showToast(err.message, 'error'));
+}
+
 function saveTelegramSettings(e) {
     e.preventDefault();
     api('/api/settings/telegram', 'POST', {
@@ -57,19 +79,19 @@ function saveTelegramSettings(e) {
         whitelist: document.getElementById('tgWhitelist').value,
         timezone: document.getElementById('tgTimezone').value
     }).then(d => {
-        showToast(d.warning || 'Telegram settings saved', d.warning ? 'error' : 'success');
+        showToast(d.warning || t('Telegram settings saved'), d.warning ? 'error' : 'success');
         document.getElementById('tgToken').value = '';
-        document.getElementById('tgToken').placeholder = 'Saved — leave blank to keep';
+        document.getElementById('tgToken').placeholder = t('Saved — leave blank to keep');
     }).catch(err => showToast(err.message, 'error'));
 }
 
 function testTelegramConnection() {
     const result = document.getElementById('tgTestResult');
-    result.textContent = 'Testing…';
+    result.textContent = t('Testing…');
     api('/api/settings/telegram/test', 'POST', {
         token: document.getElementById('tgToken').value
     }).then(d => {
-        result.textContent = `✅ Connected as @${d.bot_username}`;
+        result.textContent = '✅ ' + t('Connected as @{name}', { name: d.bot_username });
     }).catch(err => {
         result.textContent = `❌ ${err.message}`;
     });
@@ -79,7 +101,7 @@ function saveAccount(e) {
     e.preventDefault();
     const newPass = document.getElementById('accNew').value;
     if (newPass && newPass !== document.getElementById('accConfirm').value) {
-        showToast('New passwords do not match', 'error');
+        showToast(t('New passwords do not match'), 'error');
         return;
     }
     api('/api/settings/account', 'POST', {
@@ -87,7 +109,7 @@ function saveAccount(e) {
         new_username: document.getElementById('accUsername').value,
         new_password: newPass
     }).then(() => {
-        showToast('Account updated');
+        showToast(t('Account updated'));
         document.getElementById('accCurrent').value = '';
         document.getElementById('accNew').value = '';
         document.getElementById('accConfirm').value = '';
@@ -98,7 +120,7 @@ function saveAccount(e) {
 function openCategoryModal(id = null, name = '') {
     document.getElementById('catId').value = id || '';
     document.getElementById('catName').value = name;
-    document.getElementById('catModalTitle').textContent = id ? 'Edit Category' : 'Add Category';
+    document.getElementById('catModalTitle').textContent = id ? t('Edit Category') : t('Add Category');
     document.getElementById('categoryModal').classList.add('active');
 }
 function closeCategoryModal() { document.getElementById('categoryModal').classList.remove('active'); }
@@ -106,10 +128,10 @@ function closeCategoryModal() { document.getElementById('categoryModal').classLi
 function editCategory(id, name) { openCategoryModal(id, name); }
 
 function deleteCategory(id) {
-    if (!confirm('Delete this category?')) return;
+    if (!confirm(t('Delete this category?'))) return;
     api('/api/categories/' + id, 'DELETE').then(d => {
         if (d.success) {
-            showToast('Category deleted');
+            showToast(t('Category deleted'));
             location.reload();
         } else showToast(d.error, 'error');
     });
@@ -124,7 +146,7 @@ function saveCategory(e) {
     const url = id ? '/api/categories/' + id : '/api/categories';
     api(url, method, { name }).then(d => {
         if (d.success) {
-            showToast('Category saved');
+            showToast(t('Category saved'));
             location.reload();
         } else showToast(d.error, 'error');
     });
@@ -140,7 +162,7 @@ function loadProducts() {
     fetch(url).then(r => r.json()).then(products => {
         const tbody = document.getElementById('productsBody');
         if (!products.length) {
-            tbody.innerHTML = '<tr><td colspan="6" class="empty-row">No products found</td></tr>';
+            tbody.innerHTML = `<tr><td colspan="6" class="empty-row">${t('No products found')}</td></tr>`;
             return;
         }
         tbody.innerHTML = products.map(p => `
@@ -151,8 +173,8 @@ function loadProducts() {
                 <td>${formatRupiah(p.price)}</td>
                 <td>${p.stock_qty}</td>
                 <td class="action-cell">
-                    <button class="btn-icon" onclick="editProduct(${p.id})" title="Edit">✏️</button>
-                    <button class="btn-icon" onclick="deleteProduct(${p.id})" title="Archive">🗑️</button>
+                    <button class="btn-icon" onclick="editProduct(${p.id})" title="${t('Edit')}">✏️</button>
+                    <button class="btn-icon" onclick="deleteProduct(${p.id})" title="${t('Archive')}">🗑️</button>
                 </td>
             </tr>
         `).join('');
@@ -162,7 +184,7 @@ function loadProducts() {
 function openProductModal(id = null) {
     document.getElementById('productForm').reset();
     document.getElementById('productId').value = '';
-    document.getElementById('modalTitle').textContent = 'Add Product';
+    document.getElementById('modalTitle').textContent = t('Add Product');
     document.getElementById('productStock').disabled = false;
     document.getElementById('stockWarning').style.display = 'none';
     if (id) {
@@ -178,7 +200,7 @@ function openProductModal(id = null) {
                 document.getElementById('productStock').disabled = true;
                 document.getElementById('stockWarning').style.display = 'block';
                 document.getElementById('productThreshold').value = p.reorder_threshold;
-                document.getElementById('modalTitle').textContent = 'Edit Product';
+                document.getElementById('modalTitle').textContent = t('Edit Product');
             }
         });
     }
@@ -205,7 +227,7 @@ function saveProduct(e) {
     const url = id ? '/api/products/' + id : '/api/products';
     api(url, method, data).then(d => {
         if (d.success) {
-            showToast('Product saved');
+            showToast(t('Product saved'));
             closeProductModal();
             loadProducts();
         } else showToast(d.error, 'error');
@@ -213,10 +235,10 @@ function saveProduct(e) {
 }
 
 function deleteProduct(id) {
-    if (!confirm('Archive this product?')) return;
+    if (!confirm(t('Archive this product?'))) return;
     api('/api/products/' + id, 'DELETE').then(d => {
         if (d.success) {
-            showToast('Product archived');
+            showToast(t('Product archived'));
             loadProducts();
         } else showToast(d.error, 'error');
     });
@@ -238,21 +260,21 @@ function loadOrders() {
     fetch(url).then(r => r.json()).then(orders => {
         const tbody = document.getElementById('ordersBody');
         if (!orders.length) {
-            tbody.innerHTML = '<tr><td colspan="6" class="empty-row">No orders found</td></tr>';
+            tbody.innerHTML = `<tr><td colspan="6" class="empty-row">${t('No orders found')}</td></tr>`;
             return;
         }
         tbody.innerHTML = orders.map(o => `
             <tr>
                 <td>${o.id}</td>
                 <td>${formatLocalDate(o.created_at)}</td>
-                <td>${o.items ? o.items.length : 0} items</td>
+                <td>${t('{n} items', { n: o.items ? o.items.length : 0 })}</td>
                 <td>${formatRupiah(o.total_amount)}</td>
-                <td><span class="badge badge-${o.status}">${o.status === 'confirmed' ? 'Payment Confirmed' : o.status}</span></td>
+                <td><span class="badge badge-${o.status}">${o.status === 'confirmed' ? t('Payment Confirmed') : t(o.status)}</span></td>
                 <td class="action-cell">
-                    <button class="btn-icon" onclick="viewOrder(${o.id})" title="View">👁️</button>
-                    ${o.status === 'draft' ? `<button class="btn-icon" onclick="confirmOrder(${o.id})" title="Confirm">✅</button>` : ''}
-                    ${o.status === 'confirmed' ? `<button class="btn-icon" onclick="completeOrder(${o.id})" title="Complete">💰</button>` : ''}
-                    ${o.status === 'draft' || o.status === 'confirmed' ? `<button class="btn-icon" onclick="cancelOrder(${o.id})" title="Cancel">❌</button>` : ''}
+                    <button class="btn-icon" onclick="viewOrder(${o.id})" title="${t('View')}">👁️</button>
+                    ${o.status === 'draft' ? `<button class="btn-icon" onclick="confirmOrder(${o.id})" title="${t('Confirm')}">✅</button>` : ''}
+                    ${o.status === 'confirmed' ? `<button class="btn-icon" onclick="completeOrder(${o.id})" title="${t('Complete')}">💰</button>` : ''}
+                    ${o.status === 'draft' || o.status === 'confirmed' ? `<button class="btn-icon" onclick="cancelOrder(${o.id})" title="${t('Cancel')}">❌</button>` : ''}
                 </td>
             </tr>
         `).join('');
@@ -275,8 +297,8 @@ function addOrderItem() {
     div.innerHTML = `
         <div class="form-group">
             <select onchange="onProductSelect(this, ${idx})">
-                <option value="">Select product</option>
-                ${PRODUCTS.map(p => `<option value="${p.id}" data-price="${p.price}" data-stock="${p.stock}">${escapeHtml(p.name)} (Stock: ${p.stock})</option>`).join('')}
+                <option value="">${t('Select product')}</option>
+                ${PRODUCTS.map(p => `<option value="${p.id}" data-price="${p.price}" data-stock="${p.stock}">${escapeHtml(p.name)} (${t('Stock: {n}', { n: p.stock })})</option>`).join('')}
             </select>
         </div>
         <div class="form-group">
@@ -321,10 +343,10 @@ function createOrder() {
         const qty = parseInt(qtyInputs[i].value) || 0;
         if (pid && qty > 0) items.push({ product_id: pid, quantity: qty });
     }
-    if (!items.length) return showToast('Add at least one item', 'error');
+    if (!items.length) return showToast(t('Add at least one item'), 'error');
     api('/api/orders', 'POST', { items }).then(d => {
         if (d.success) {
-            showToast(`Order ID ${d.order_id} created`);
+            showToast(t('Order ID {id} created', { id: d.order_id }));
             closeOrderModal();
             loadOrders();
         } else showToast(d.error, 'error');
@@ -332,30 +354,30 @@ function createOrder() {
 }
 
 function confirmOrder(id) {
-    if (!confirm('Confirm payment for this order?')) return;
+    if (!confirm(t('Confirm payment for this order?'))) return;
     api('/api/orders/' + id + '/confirm', 'POST').then(d => {
         if (d.success) {
-            showToast('Payment confirmed');
+            showToast(t('Payment confirmed'));
             loadOrders();
         } else showToast(d.error, 'error');
     });
 }
 
 function completeOrder(id) {
-    if (!confirm('Complete this order? Stock will be deducted.')) return;
+    if (!confirm(t('Complete this order? Stock will be deducted.'))) return;
     api('/api/orders/' + id + '/complete', 'POST').then(d => {
         if (d.success) {
-            showToast('Order completed');
+            showToast(t('Order completed'));
             loadOrders();
         } else showToast(d.error, 'error');
     });
 }
 
 function cancelOrder(id) {
-    if (!confirm('Cancel this order?')) return;
+    if (!confirm(t('Cancel this order?'))) return;
     api('/api/orders/' + id + '/cancel', 'POST').then(d => {
         if (d.success) {
-            showToast('Order cancelled');
+            showToast(t('Order cancelled'));
             loadOrders();
         } else showToast(d.error, 'error');
     });
@@ -365,12 +387,12 @@ function viewOrder(id) {
     fetch('/api/orders?').then(r => r.json()).then(orders => {
         const o = orders.find(x => x.id === id);
         if (!o) return;
-        document.getElementById('detailOrderId').textContent = `Order ID ${o.id}`;
+        document.getElementById('detailOrderId').textContent = t('Order ID {id}', { id: o.id });
         let html = `
-            <p><strong>Status:</strong> <span class="badge badge-${o.status}">${o.status === 'confirmed' ? 'Payment Confirmed' : o.status}</span></p>
-            <p><strong>Date:</strong> ${formatLocalDate(o.created_at)}</p>
+            <p><strong>${t('Status')}:</strong> <span class="badge badge-${o.status}">${o.status === 'confirmed' ? t('Payment Confirmed') : t(o.status)}</span></p>
+            <p><strong>${t('Date')}:</strong> ${formatLocalDate(o.created_at)}</p>
             <table class="data-table" style="margin:12px 0">
-                <thead><tr><th>Product</th><th>Qty</th><th>Price</th><th>Subtotal</th></tr></thead>
+                <thead><tr><th>${t('Product')}</th><th>${t('Qty')}</th><th>${t('Price')}</th><th>${t('Subtotal')}</th></tr></thead>
                 <tbody>
                     ${(o.items || []).map(i => `
                         <tr>
@@ -382,7 +404,7 @@ function viewOrder(id) {
                     `).join('')}
                 </tbody>
             </table>
-            <p style="text-align:right;font-size:18px;font-weight:700">Total: ${formatRupiah(o.total_amount)}</p>
+            <p style="text-align:right;font-size:18px;font-weight:700">${t('Total')}: ${formatRupiah(o.total_amount)}</p>
         `;
         document.getElementById('orderDetailContent').innerHTML = html;
         document.getElementById('orderDetailModal').classList.add('active');
@@ -433,7 +455,7 @@ function loadSalesTrend() {
                 data: {
                     labels: d.map(p => p.label),
                     datasets: [{
-                        label: 'Revenue',
+                        label: t('Revenue'),
                         data: d.map(p => p.revenue),
                         borderColor: '#4361ee',
                         backgroundColor: 'rgba(67,97,238,0.1)',
@@ -448,7 +470,7 @@ function loadSalesTrend() {
                         legend: { display: false },
                         tooltip: {
                             callbacks: {
-                                label: ctx => 'Revenue: ' + formatRupiah(ctx.raw)
+                                label: ctx => t('Revenue') + ': ' + formatRupiah(ctx.raw)
                             }
                         }
                     },
@@ -478,7 +500,7 @@ function loadTopProducts() {
                     <td>${formatRupiah(p.total_revenue)}</td>
                 </tr>
             `;
-            const emptyRow = '<tr><td colspan="4" class="empty-row">No data yet</td></tr>';
+            const emptyRow = `<tr><td colspan="4" class="empty-row">${t('No data yet')}</td></tr>`;
             topBody.innerHTML = d.top.length ? d.top.map(sellerRow).join('') : emptyRow;
             bottomBody.innerHTML = d.bottom.length ? d.bottom.map(sellerRow).join('') : emptyRow;
         });
@@ -492,19 +514,19 @@ function updateTimeLabel() {
     if (timeUnit === 'day') {
         const d = new Date(now);
         d.setDate(d.getDate() - timeOffset);
-        labelEl.textContent = d.toLocaleDateString('en-US', {month: 'short', day: 'numeric', year: 'numeric'});
+        labelEl.textContent = d.toLocaleDateString(DATE_LOCALE, {month: 'short', day: 'numeric', year: 'numeric'});
     } else if (timeUnit === 'week') {
         const dow = now.getDay();
         const monday = new Date(now);
         monday.setDate(now.getDate() - ((dow + 6) % 7) - timeOffset * 7);
         const sunday = new Date(monday);
         sunday.setDate(monday.getDate() + 6);
-        labelEl.textContent = monday.toLocaleDateString('en-US', {month: 'short', day: 'numeric'}) + ' - ' +
-                              sunday.toLocaleDateString('en-US', {month: 'short', day: 'numeric', year: 'numeric'});
+        labelEl.textContent = monday.toLocaleDateString(DATE_LOCALE, {month: 'short', day: 'numeric'}) + ' - ' +
+                              sunday.toLocaleDateString(DATE_LOCALE, {month: 'short', day: 'numeric', year: 'numeric'});
     } else if (timeUnit === 'month') {
         const d = new Date(now.getFullYear(), now.getMonth() - timeOffset, 1);
         const lastDay = new Date(now.getFullYear(), now.getMonth() - timeOffset + 1, 0);
-        labelEl.textContent = d.toLocaleDateString('en-US', {month: 'short', year: 'numeric'}) +
+        labelEl.textContent = d.toLocaleDateString(DATE_LOCALE, {month: 'short', year: 'numeric'}) +
                               ' (' + d.getDate() + ' - ' + lastDay.getDate() + ')';
     } else if (timeUnit === 'year') {
         labelEl.textContent = (now.getFullYear() - timeOffset).toString();
@@ -549,12 +571,12 @@ function addRestockItem() {
     div.innerHTML = `
         <div class="form-group">
             <select id="restock-product-${idx}">
-                <option value="">Select product</option>
-                ${PRODUCTS.map(p => `<option value="${p.id}">${escapeHtml(p.name)} (${escapeHtml(p.sku || '-')}) - Stock: ${p.stock}</option>`).join('')}
+                <option value="">${t('Select product')}</option>
+                ${PRODUCTS.map(p => `<option value="${p.id}">${escapeHtml(p.name)} (${escapeHtml(p.sku || '-')}) - ${t('Stock: {n}', { n: p.stock })}</option>`).join('')}
             </select>
         </div>
         <div class="form-group">
-            <input type="number" id="restock-qty-${idx}" min="1" value="1" placeholder="Qty">
+            <input type="number" id="restock-qty-${idx}" min="1" value="1" placeholder="${t('Qty')}">
         </div>
         <div class="form-group">
             <button class="btn-remove-item" onclick="this.closest('.restock-item-row').remove();">&times;</button>
@@ -575,11 +597,11 @@ function submitRestock() {
             items.push({ product_id: pid, qty: qty });
         }
     });
-    if (!items.length) return showToast('Add at least one product', 'error');
+    if (!items.length) return showToast(t('Add at least one product'), 'error');
     const batchCost = parseFloat(document.getElementById('restockTotalCostInput').value) || 0;
     api('/api/restock', 'POST', { items, total_cost: batchCost }).then(d => {
         if (d.success) {
-            showToast(`Restock saved! Total cost: ${formatRupiah(d.total_cost)}`);
+            showToast(t('Restock saved! Total cost: {cost}', { cost: formatRupiah(d.total_cost) }));
             document.getElementById('restockItems').innerHTML = '';
             document.getElementById('restockTotalCostInput').value = '0';
             addRestockItem();
@@ -593,15 +615,15 @@ function loadRestockHistory() {
         .then(d => {
             const tbody = document.getElementById('restockHistoryBody');
             if (!d.length) {
-                tbody.innerHTML = '<tr><td colspan="4" class="empty-row">No restock history yet</td></tr>';
+                tbody.innerHTML = `<tr><td colspan="4" class="empty-row">${t('No restock history yet')}</td></tr>`;
                 return;
             }
             tbody.innerHTML = d.map(b => {
                 const productList = b.items.map(i => `${escapeHtml(i.product_name)} (${escapeHtml(i.product_sku || '-')}): +${i.qty_added}`).join('<br>');
                 return `
                     <tr class="restock-batch-row" onclick="const d = this.nextElementSibling; d.style.display = d.style.display === 'none' ? '' : 'none'">
-                        <td>Batch #${b.id}</td>
-                        <td>${b.items.length} product${b.items.length > 1 ? 's' : ''}</td>
+                        <td>${t('Batch #{id}', { id: b.id })}</td>
+                        <td>${t('{n} products', { n: b.items.length })}</td>
                         <td>${formatRupiah(b.total_cost)}</td>
                         <td>${formatLocalDate(b.created_at)}</td>
                     </tr>

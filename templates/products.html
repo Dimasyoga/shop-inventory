@@ -1,16 +1,16 @@
 {% extends "base.html" %}
-{% block title %}Products{% endblock %}
+{% block title %}{{ t('Products') }}{% endblock %}
 {% block content %}
 <div class="page-header">
-    <h2>Products</h2>
-    <button class="btn btn-primary" onclick="openProductModal()">+ Add Product</button>
+    <h2>{{ t('Products') }}</h2>
+    <button class="btn btn-primary" onclick="openProductModal()">{{ t('+ Add Product') }}</button>
 </div>
 
 <div class="card">
     <div class="table-controls">
-        <input type="text" id="searchProduct" class="search-input" placeholder="Search products..." oninput="loadProducts()">
+        <input type="text" id="searchProduct" class="search-input" placeholder="{{ t('Search products...') }}" oninput="loadProducts()">
         <select id="filterCategory" onchange="loadProducts()">
-            <option value="">All Categories</option>
+            <option value="">{{ t('All Categories') }}</option>
             {% for c in categories %}
             <option value="{{ c['id'] }}">{{ c['name'] }}</option>
             {% endfor %}
@@ -18,7 +18,7 @@
     </div>
     <table class="data-table" id="productsTable">
         <thead>
-            <tr><th>SKU</th><th>Name</th><th>Category</th><th>Sale Price</th><th>Stock</th><th>Actions</th></tr>
+            <tr><th>{{ t('SKU') }}</th><th>{{ t('Name') }}</th><th>{{ t('Category') }}</th><th>{{ t('Sale Price') }}</th><th>{{ t('Stock') }}</th><th>{{ t('Actions') }}</th></tr>
         </thead>
         <tbody id="productsBody">
         </tbody>
@@ -29,23 +29,23 @@
 <div class="modal" id="productModal">
     <div class="modal-content">
         <div class="modal-header">
-            <h3 id="modalTitle">Add Product</h3>
+            <h3 id="modalTitle">{{ t('Add Product') }}</h3>
             <span class="modal-close" onclick="closeProductModal()">&times;</span>
         </div>
         <form id="productForm" onsubmit="saveProduct(event)">
             <input type="hidden" id="productId">
             <div class="form-group">
-                <label>Name *</label>
+                <label>{{ t('Name *') }}</label>
                 <input type="text" id="productName" required>
             </div>
             <div class="form-group">
-                <label>SKU</label>
+                <label>{{ t('SKU') }}</label>
                 <input type="text" id="productSku">
             </div>
             <div class="form-group">
-                <label>Category</label>
+                <label>{{ t('Category') }}</label>
                 <select id="productCategory">
-                    <option value="">None</option>
+                    <option value="">{{ t('None') }}</option>
                     {% for c in categories %}
                     <option value="{{ c['id'] }}">{{ c['name'] }}</option>
                     {% endfor %}
@@ -53,22 +53,22 @@
             </div>
             <div class="form-row">
                 <div class="form-group">
-                    <label>Price (Rp) *</label>
+                    <label>{{ t('Price (Rp) *') }}</label>
                     <input type="number" id="productPrice" required min="0" step="1">
                 </div>
                 <div class="form-group">
-                    <label>Stock Qty</label>
+                    <label>{{ t('Stock Qty') }}</label>
                     <input type="number" id="productStock" min="0" value="0">
-                    <small class="field-warning" id="stockWarning">Stock is managed via orders and the Restock page and can't be edited here.</small>
+                    <small class="field-warning" id="stockWarning">{{ t("Stock is managed via orders and the Restock page and can't be edited here.") }}</small>
                 </div>
                 <div class="form-group">
-                    <label>Reorder Threshold</label>
+                    <label>{{ t('Reorder Threshold') }}</label>
                     <input type="number" id="productThreshold" min="0" value="0">
                 </div>
             </div>
             <div class="modal-actions">
-                <button type="button" class="btn btn-secondary" onclick="closeProductModal()">Cancel</button>
-                <button type="submit" class="btn btn-primary">Save</button>
+                <button type="button" class="btn btn-secondary" onclick="closeProductModal()">{{ t('Cancel') }}</button>
+                <button type="submit" class="btn btn-primary">{{ t('Save') }}</button>
             </div>
         </form>
     </div>

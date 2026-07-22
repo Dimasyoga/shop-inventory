@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{ lang }}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login - Shop Inventory</title>
+    <title>{{ t('Login') }} - {{ t('Shop Inventory') }}</title>
     <link rel="stylesheet" href="/static/css/style.css">
     <style>
         .login-container {
@@ -36,21 +36,21 @@
 <body>
     <div class="login-container">
         <div class="login-box">
-            <h1>📦 Shop Inventory</h1>
-            <p>Sign in to manage your shop</p>
+            <h1>📦 {{ t('Shop Inventory') }}</h1>
+            <p>{{ t('Sign in to manage your shop') }}</p>
             {% if error %}
             <div class="error-msg">{{ error }}</div>
             {% endif %}
             <form method="POST" action="{{ url_for('login') }}">
                 <div class="form-group">
-                    <label>Username</label>
+                    <label>{{ t('Username') }}</label>
                     <input type="text" name="username" required autofocus>
                 </div>
                 <div class="form-group">
-                    <label>Password</label>
+                    <label>{{ t('Password') }}</label>
                     <input type="password" name="password" required>
                 </div>
-                <button type="submit" class="btn-login">Sign In</button>
+                <button type="submit" class="btn-login">{{ t('Sign In') }}</button>
             </form>
         </div>
     </div>

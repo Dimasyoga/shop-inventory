@@ -7,7 +7,7 @@ import pytest
 
 import database
 import telegram_bot
-from telegram_bot import ChatStates, handle_update, parse_cost
+from telegram_bot import ChatStates, handle_update, parse_cost, parse_qty
 
 JKT = ZoneInfo("Asia/Jakarta")
 OWNER = 111  # whitelisted
@@ -53,6 +53,12 @@ class FakeAPI:
         if not markup:
             return []
         return [b["callback_data"] for row in markup["inline_keyboard"] for b in row]
+
+    def buttons_text(self):
+        markup = self.last_markup()
+        if not markup:
+            return []
+        return [b["text"] for row in markup["inline_keyboard"] for b in row]
 
 
 def text_update(text, sender=OWNER, chat=CHAT):
@@ -248,6 +254,40 @@ def test_order_flow_oversell_rejected_at_create(bot):
     assert alerts and "Insufficient stock" in alerts[-1]["text"]
 
 
+def test_order_flow_custom_quantity(bot):
+    api, drive = bot
+    pid = make_product(name="Kopi", price=5000, stock=100)
+    drive(cb_update("no"))               # start flow -> picker
+    drive(cb_update(f"no:i:{pid}"))      # pick Kopi -> qty keyboard
+    assert "no:qc" in api.buttons()      # custom-quantity option offered
+    drive(cb_update("no:qc"))            # choose to type a custom amount
+    assert "quantity" in api.last_text().lower()
+    drive(text_update("37"))             # any number, not in QTY_CHOICES
+    drive(cb_update("no:d"))             # done -> review
+    assert "185.000" in api.last_text()  # 37 * 5000
+    drive(cb_update("no:!"))             # create
+    order = db_one("SELECT * FROM orders WHERE status='draft'")
+    assert order["total_amount"] == 185000
+    qty = db_one("SELECT quantity FROM order_items WHERE order_id=?", (order["id"],))["quantity"]
+    assert qty == 37
+    assert drive.states.get(CHAT) is None  # state cleared
+
+
+def test_custom_quantity_rejects_bad_input_then_accepts(bot):
+    api, drive = bot
+    pid = make_product(name="Kopi", price=5000, stock=100)
+    drive(cb_update("no"))
+    drive(cb_update(f"no:i:{pid}"))
+    drive(cb_update("no:qc"))
+    drive(text_update("lots"))           # unparseable -> re-prompt, stays in flow
+    assert "Couldn't read" in api.last_text()
+    assert drive.states.get(CHAT)["await_qty"] is True
+    drive(text_update("0"))              # zero is not a valid quantity
+    assert "Couldn't read" in api.last_text()
+    drive(text_update("4"))              # valid -> back to picker
+    assert drive.states.get(CHAT)["items"] == {pid: 4}
+
+
 def test_stale_flow_callback_shows_session_expired(bot):
     api, drive = bot
     make_product()
@@ -294,6 +334,60 @@ def test_parse_cost():
     assert parse_cost("-5") is None
 
 
+def set_language(lang):
+    db = database.get_db()
+    database.set_setting(db, "language", lang)
+    db.commit()
+    db.close()
+
+
+def test_menu_renders_in_indonesian_when_set(bot):
+    api, drive = bot
+    set_language("id")
+    drive(text_update("/start"))
+    text = api.last_text()
+    assert "Apa yang ingin Anda lakukan?" in text  # "What do you want to do?"
+    assert "📦 Produk" in api.buttons_text()        # translated button label
+
+
+def test_menu_stays_english_by_default(bot):
+    api, drive = bot
+    drive(text_update("/start"))
+    assert "What do you want to do?" in api.last_text()
+    assert "📦 Products" in api.buttons_text()
+
+
+def test_bad_language_setting_falls_back_to_english(bot):
+    api, drive = bot
+    set_language("fr")  # unsupported value must never break rendering
+    drive(text_update("/start"))
+    assert "What do you want to do?" in api.last_text()
+
+
+def test_service_error_alert_translated(bot):
+    api, drive = bot
+    set_language("id")
+    make_product(name="Kopi", stock=1)
+    drive(cb_update("no"))
+    drive(cb_update(f"no:i:{db_one('SELECT id FROM products')['id']}"))
+    drive(cb_update("no:q:5"))           # oversell
+    drive(cb_update("no:d"))
+    drive(cb_update("no:!"))             # create -> "Insufficient stock for {name}"
+    alerts = [p for p in api.sent("answerCallbackQuery") if p["show_alert"]]
+    # translated, with the product name interpolated into the template
+    assert alerts and alerts[-1]["text"] == "Stok tidak cukup untuk Kopi"
+
+
+def test_parse_qty():
+    assert parse_qty("12") == 12
+    assert parse_qty("  3 ") == 3
+    assert parse_qty("0") is None
+    assert parse_qty("-5") is None
+    assert parse_qty("1.5") is None
+    assert parse_qty("abc") is None
+    assert parse_qty("") is None
+
+
 # --- Summary ---
 
 def test_summary_renders_revenue_and_navigates(bot):
@@ -313,6 +407,18 @@ def test_summary_renders_revenue_and_navigates(bot):
     assert "Rp 0" in api.last_text()
     drive(cb_update("s:w:0"))           # switch unit
     assert "10.000" in api.last_text()
+
+
+def test_summary_month_name_localized(bot):
+    import i18n
+    from datetime import datetime, timezone
+    api, drive = bot
+    set_language("id")
+    drive(cb_update("s:m:0"))            # month view
+    # The current month's Indonesian name appears in the label (built without strftime).
+    month_id = i18n.month_name(datetime.now(timezone.utc).astimezone(JKT).month, "id")
+    assert month_id in api.last_text()
+    assert "Penjualan" in api.last_text()  # header also translated
 
 
 def test_plain_text_resets_to_menu(bot):

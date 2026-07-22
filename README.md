@@ -20,6 +20,24 @@ A Flask-based shop inventory management system built with Python 3.14, SQLite, a
 - Stock audit logging on every sale and restock
 - Low stock alerts and reorder thresholds
 - Telegram bot with button-driven menus (see below)
+- Bilingual interface — English and Bahasa Indonesia (see below)
+
+### Language
+
+The web interface and the Telegram bot are available in **English** and
+**Bahasa Indonesia**. Choose the language under **Settings → Language**; the
+choice is a single shop-wide setting that applies to every user and to the bot
+(bot changes take effect within one poll cycle, no restart needed). English is
+the default.
+
+Translations live in `i18n.py` as a single `English source string → translation`
+table shared by the templates, the browser JavaScript (`app.js`), and the bot.
+Adding a language means adding one entry to `LANGUAGES`, a mapping in
+`TRANSLATIONS`, and its month/weekday names (`MONTHS`, `MONTHS_ABBR`,
+`WEEKDAYS_ABBR`); any missing translation key falls back to the English source,
+so a partial translation degrades gracefully. Date labels are built from those
+calendar tables (bot) and the browser's `Intl` locale (web) rather than the
+server locale, so month and weekday names are localized too.
 
 ### Telegram Bot
 
@@ -50,6 +68,7 @@ shop-inventory/
 ├── app.py              # Flask routes + web-layer validation
 ├── services.py         # Business logic shared by web routes and the bot
 ├── telegram_bot.py     # Telegram bot: API client, menus, flows, poller
+├── i18n.py             # Translation table + helpers (web UI, JS, bot)
 ├── database.py         # SQLite schema, migrations, settings, DB connection
 ├── shop.db             # SQLite database file
 ├── start.sh            # Startup script
@@ -65,7 +84,7 @@ shop-inventory/
     ├── orders.html     # Order creation and lifecycle
     ├── restock.html    # Batch restock with cost tracking
     ├── sales.html      # Sales analytics dashboard
-    └── settings.html   # Telegram bot config + account management
+    └── settings.html   # Language, Telegram bot config + account management
 ```
 
 ---
