@@ -19,7 +19,7 @@ A Flask-based shop inventory management system built with Python 3.14, SQLite, a
 - Sales dashboard with period-based analytics and trend charts
 - Stock audit logging on every sale and restock
 - Low stock alerts and reorder thresholds
-- Telegram bot with button-driven menus (see below)
+- Telegram bot with button-driven menus and stale-order alerts (see below)
 - Bilingual interface — English and Bahasa Indonesia (see below)
 
 ### Language
@@ -58,6 +58,20 @@ apply within one poll cycle (~25 s) — no restart needed. The bot uses long
 polling, so it works on a LAN with no public URL. Bot sales summaries use the
 **shop timezone** configured in Settings (web-page summaries follow the
 browser's timezone).
+
+#### Stale-order alerts
+
+The bot proactively messages every whitelisted user when an order stays stuck in
+**draft** or **payment-confirmed** longer than a configurable threshold — an
+early warning for orders that were never completed or cancelled. Set the
+threshold under **Settings → Telegram Bot → Stale order alert threshold
+(hours)** (default 24; `0` or blank disables it).
+
+Staleness is counted from the last status change, so confirming a stale draft
+resets its clock. Each order is alerted at most once per state: once while it
+sits in draft, and once more if it later stalls after payment confirmation. The
+poller scans for stale orders about every 5 minutes, independent of the message
+poll cycle.
 
 To enable the Flask debugger during development: `FLASK_DEBUG=1 ./start.sh`
 (never on a network you don't trust — the debugger allows code execution).

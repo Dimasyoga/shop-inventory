@@ -549,6 +549,7 @@ def settings_page():
         token_set=bool(get_setting(g.db, 'telegram_bot_token', '')),
         whitelist=get_setting(g.db, 'telegram_whitelist', ''),
         shop_timezone=get_setting(g.db, 'shop_timezone', 'Asia/Jakarta'),
+        order_alert_hours=get_setting(g.db, 'order_alert_hours', '24'),
         current_lang=get_lang(),
         username=session.get('username', ''))
 
@@ -591,6 +592,22 @@ def api_settings_telegram():
         except (ZoneInfoNotFoundError, ValueError):
             return jsonify({'error': f"Unknown timezone '{tz_name}'"}), 400
 
+    # Stale-order alert threshold in hours. Absent -> leave unchanged; blank -> disable (0).
+    alert_hours_val = None
+    if 'alert_hours' in data:
+        raw = data.get('alert_hours')
+        s = str(raw).strip() if raw is not None else ''
+        if s == '':
+            alert_hours_val = '0'
+        else:
+            try:
+                hours = float(s)
+            except ValueError:
+                return jsonify({'error': 'Alert threshold must be a number'}), 400
+            if hours < 0:
+                return jsonify({'error': 'Alert threshold cannot be negative'}), 400
+            alert_hours_val = s
+
     # Blank token means keep the saved one; the saved value is never echoed to the browser.
     effective_token = token or get_setting(g.db, 'telegram_bot_token', '')
     if enabled and not effective_token:
@@ -602,6 +619,8 @@ def api_settings_telegram():
     set_setting(g.db, 'telegram_whitelist', ','.join(str(i) for i in ids))
     if tz_name:
         set_setting(g.db, 'shop_timezone', tz_name)
+    if alert_hours_val is not None:
+        set_setting(g.db, 'order_alert_hours', alert_hours_val)
     g.db.commit()
     warning = 'No users whitelisted — the bot will reject everyone' if enabled and not ids else None
     return jsonify({'success': True, 'warning': warning})

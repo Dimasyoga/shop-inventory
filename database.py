@@ -68,7 +68,8 @@ def init_db():
             status TEXT NOT NULL DEFAULT 'draft',
             total_amount REAL NOT NULL DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            alerted_status TEXT
         );
 
         CREATE TABLE IF NOT EXISTS order_items (
@@ -125,6 +126,12 @@ def init_db():
             FOREIGN KEY (batch_id) REFERENCES restock_batches(id),
             FOREIGN KEY (product_id) REFERENCES products(id)
         )''')
+
+    # Migrate: track which order status a stale-order alert was last sent for, so
+    # the Telegram bot notifies once per stalling status instead of every cycle.
+    order_cols = [r[1] for r in c.execute("PRAGMA table_info(orders)").fetchall()]
+    if 'alerted_status' not in order_cols:
+        c.execute("ALTER TABLE orders ADD COLUMN alerted_status TEXT")
 
     # Seed default user
     c.execute("SELECT COUNT(*) FROM users")

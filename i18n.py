@@ -188,6 +188,10 @@ TRANSLATIONS = {
             'ID pengguna Telegram yang diizinkan (dipisahkan koma)',
         'Shop timezone (for bot sales summaries)':
             'Zona waktu toko (untuk ringkasan penjualan bot)',
+        'Stale order alert threshold (hours)':
+            'Ambang peringatan pesanan tertahan (jam)',
+        'Alert whitelisted users when a draft or payment-confirmed order stays in that state longer than this. 0 disables.':
+            'Beri tahu pengguna yang diizinkan saat pesanan draf atau pembayaran-dikonfirmasi bertahan di status itu lebih lama dari ini. 0 menonaktifkan.',
         'Test Connection': 'Uji Koneksi',
         'Account': 'Akun',
         'Current password': 'Kata sandi saat ini',
@@ -260,6 +264,11 @@ TRANSLATIONS = {
         '✅ Save restock': '✅ Simpan restok',
         'View order': 'Lihat pesanan',
         'Total: {amount}': 'Total: {amount}',
+        # stale-order alerts (pushed by the bot poller)
+        'Order needs attention': 'Pesanan perlu perhatian',
+        'Order #{n} — {status}': 'Pesanan #{n} — {status}',
+        'Stuck in this state for over {hours}h.':
+            'Tertahan di status ini lebih dari {hours} jam.',
         # bot prompts / acks
         'Not authorized. Your Telegram ID: <code>{id}</code>':
             'Tidak diizinkan. ID Telegram Anda: <code>{id}</code>',

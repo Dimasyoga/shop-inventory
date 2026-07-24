@@ -100,7 +100,7 @@ class TelegramAPI:
 
 # --- Config ---
 
-BotConfig = namedtuple('BotConfig', 'enabled token whitelist tz')
+BotConfig = namedtuple('BotConfig', 'enabled token whitelist tz alert_hours')
 
 
 def parse_whitelist(raw):
@@ -109,6 +109,16 @@ def parse_whitelist(raw):
         if tok.lstrip('-').isdigit():
             ids.add(int(tok))
     return ids
+
+
+def parse_alert_hours(raw):
+    """Stale-order threshold in hours as a positive float; None (disabled) for
+    blank, zero, negative, or unparseable values."""
+    try:
+        hours = float(str(raw).strip())
+    except (TypeError, ValueError):
+        return None
+    return hours if hours > 0 else None
 
 
 def load_bot_config(db):
@@ -122,7 +132,8 @@ def load_bot_config(db):
         enabled=get_setting(db, 'telegram_enabled', '0') == '1',
         token=get_setting(db, 'telegram_bot_token', '') or '',
         whitelist=parse_whitelist(get_setting(db, 'telegram_whitelist', '')),
-        tz=tz)
+        tz=tz,
+        alert_hours=parse_alert_hours(get_setting(db, 'order_alert_hours', '24')))
 
 
 # --- Conversation state (order/restock flows only; everything else is stateless) ---
@@ -585,20 +596,80 @@ def _handle_flow_callback(api, db, callback, parts, states, show, ack, t):
         ack(i18n.translate_error(e, t), alert=True)
 
 
+# --- Stale-order alerts ---
+
+def _fmt_hours(hours):
+    """'24.0' -> '24', '12.5' -> '12.5' for display in alert text."""
+    return str(int(hours)) if float(hours).is_integer() else str(hours)
+
+
+def send_stale_order_alerts(api, db, cfg, t):
+    """Notify whitelisted users of orders stuck in draft/confirmed past the threshold.
+
+    Sends at most one alert per order per stalling status: the order is flagged
+    again only if it later stalls in a new status (draft -> confirmed). No-op when
+    the threshold is disabled or the whitelist is empty. An order is marked alerted
+    only once at least one recipient received the message, so transient send
+    failures are retried on the next check.
+    """
+    if not cfg.alert_hours or not cfg.whitelist:
+        return
+    hh = _fmt_hours(cfg.alert_hours)
+    for order in services.find_stale_orders(db, cfg.alert_hours):
+        status_label = t(STATUS_LABELS.get(order['status'], order['status']))
+        text = '\n'.join([
+            f"<b>⏰ {t('Order needs attention')}</b>",
+            t('Order #{n} — {status}', n=order['id'], status=status_label),
+            t('Stuck in this state for over {hours}h.', hours=hh),
+            t('Total: {amount}', amount=format_rupiah(order['total_amount'])),
+        ])
+        markup = kb([btn(t('View order'), f"od:{order['id']}")])
+        delivered = False
+        for chat_id in cfg.whitelist:
+            try:
+                api.send_message(chat_id, text, markup)
+                delivered = True
+            except (TelegramError, OSError) as e:
+                log.warning('stale-order alert for #%s to %s failed: %s',
+                            order['id'], chat_id, e)
+        if delivered:
+            services.mark_order_alerted(db, order['id'], order['status'])
+
+
 # --- Poller ---
 
 class BotPoller(threading.Thread):
     def __init__(self, db_factory=database.get_db, api_factory=TelegramAPI,
-                 poll_timeout=25, sleep=time.sleep):
+                 poll_timeout=25, sleep=time.sleep, clock=time.monotonic,
+                 alert_interval=300):
         super().__init__(daemon=True, name='telegram-bot')
         self.db_factory = db_factory
         self.api_factory = api_factory
         self.poll_timeout = poll_timeout
         self.sleep = sleep
+        self.clock = clock
+        self.alert_interval = alert_interval
         self.states = ChatStates()
         self._token = None
         self._api = None
         self._offset = None
+        self._next_alert_check = 0
+
+    def _maybe_check_alerts(self, cfg):
+        """Run the stale-order scan at most once per `alert_interval` seconds."""
+        now = self.clock()
+        if now < self._next_alert_check:
+            return
+        self._next_alert_check = now + self.alert_interval
+        db = self.db_factory()
+        try:
+            from database import get_setting
+            t = i18n.make_t(i18n.normalize_lang(get_setting(db, 'language', i18n.DEFAULT_LANG)))
+            send_stale_order_alerts(self._api, db, cfg, t)
+        except Exception:
+            log.exception('stale-order alert check failed')
+        finally:
+            db.close()
 
     def _cycle(self):
         db = self.db_factory()
@@ -614,6 +685,7 @@ class BotPoller(threading.Thread):
             self._token = cfg.token
             self._api = self.api_factory(cfg.token)
             self._offset = None
+        self._maybe_check_alerts(cfg)
         updates = self._api.get_updates(offset=self._offset, timeout=self.poll_timeout)
         for u in updates:
             # advance even if handling fails: never re-loop a poison update

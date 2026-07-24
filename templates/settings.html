@@ -50,6 +50,11 @@
             <label for="tgTimezone">{{ t('Shop timezone (for bot sales summaries)') }}</label>
             <input type="text" id="tgTimezone" value="{{ shop_timezone }}" placeholder="Asia/Jakarta">
         </div>
+        <div class="form-group">
+            <label for="tgAlertHours">{{ t('Stale order alert threshold (hours)') }}</label>
+            <input type="number" id="tgAlertHours" min="0" step="any" value="{{ order_alert_hours }}" placeholder="24">
+            <small class="help-text">{{ t('Alert whitelisted users when a draft or payment-confirmed order stays in that state longer than this. 0 disables.') }}</small>
+        </div>
         <div class="form-actions">
             <button type="button" class="btn" onclick="testTelegramConnection()">{{ t('Test Connection') }}</button>
             <button type="submit" class="btn btn-primary">{{ t('Save') }}</button>

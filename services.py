@@ -259,3 +259,35 @@ def sales_summary(db, unit, offset, tz):
         'start': start,
         'end': end,
     }
+
+
+# --- Stale-order alerts (used by the Telegram bot poller) ---
+
+def find_stale_orders(db, hours, now=None):
+    """Orders stuck in draft/confirmed longer than `hours`, not yet alerted for
+    their current status.
+
+    Staleness is measured from ``updated_at`` (time in the current state), so a
+    freshly-confirmed order restarts the clock. ``hours`` of None or <= 0 disables
+    alerting and returns an empty list.
+    """
+    if not hours or hours <= 0:
+        return []
+    now = now or datetime.now(timezone.utc)
+    cutoff = _to_utc_str(now - timedelta(hours=hours))
+    return db.execute(
+        "SELECT * FROM orders "
+        "WHERE status IN ('draft', 'confirmed') AND updated_at <= ? "
+        "  AND (alerted_status IS NULL OR alerted_status != status) "
+        "ORDER BY id",
+        (cutoff,)).fetchall()
+
+
+def mark_order_alerted(db, order_id, status):
+    """Record that a stale-order alert was sent for `order_id` while in `status`.
+
+    Keyed on the status value so an order that later stalls in a different state
+    (draft -> confirmed) is flagged again exactly once.
+    """
+    db.execute("UPDATE orders SET alerted_status = ? WHERE id = ?", (status, order_id))
+    db.commit()

@@ -77,7 +77,8 @@ function saveTelegramSettings(e) {
         enabled: document.getElementById('tgEnabled').checked,
         token: document.getElementById('tgToken').value,
         whitelist: document.getElementById('tgWhitelist').value,
-        timezone: document.getElementById('tgTimezone').value
+        timezone: document.getElementById('tgTimezone').value,
+        alert_hours: document.getElementById('tgAlertHours').value
     }).then(d => {
         showToast(d.warning || t('Telegram settings saved'), d.warning ? 'error' : 'success');
         document.getElementById('tgToken').value = '';

@@ -46,6 +46,38 @@ def test_enable_without_token_rejected(client):
     assert "token" in res.get_json()["error"].lower()
 
 
+def test_alert_hours_round_trip(client):
+    res = client.post("/api/settings/telegram", json={
+        "enabled": False, "whitelist": "1", "alert_hours": "12"})
+    assert res.status_code == 200
+    assert get_setting("order_alert_hours") == "12"
+
+
+def test_blank_alert_hours_disables(client):
+    client.post("/api/settings/telegram", json={"enabled": False, "whitelist": "1", "alert_hours": "24"})
+    res = client.post("/api/settings/telegram", json={"enabled": False, "whitelist": "1", "alert_hours": ""})
+    assert res.status_code == 200
+    assert get_setting("order_alert_hours") == "0"
+
+
+def test_negative_alert_hours_rejected(client):
+    res = client.post("/api/settings/telegram", json={
+        "enabled": False, "whitelist": "1", "alert_hours": "-5"})
+    assert res.status_code == 400
+
+
+def test_non_numeric_alert_hours_rejected(client):
+    res = client.post("/api/settings/telegram", json={
+        "enabled": False, "whitelist": "1", "alert_hours": "soon"})
+    assert res.status_code == 400
+
+
+def test_alert_hours_omitted_leaves_setting_unchanged(client):
+    client.post("/api/settings/telegram", json={"enabled": False, "whitelist": "1", "alert_hours": "6"})
+    client.post("/api/settings/telegram", json={"enabled": False, "whitelist": "1"})
+    assert get_setting("order_alert_hours") == "6"
+
+
 def test_empty_whitelist_warns(client):
     res = client.post("/api/settings/telegram", json={"enabled": True, "token": "123:ABC", "whitelist": ""})
     assert res.status_code == 200
