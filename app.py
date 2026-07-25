@@ -110,6 +110,12 @@ def _service_error(e):
     """JSON response for a ServiceError, translated to the active language."""
     return jsonify({'error': i18n.translate_error(e, i18n.make_t(get_lang()))}), e.status
 
+def _err(msg, status=400, **params):
+    """JSON error response. ``msg`` is the English source string; it is translated
+    to the active language the same way template/bot strings are, since the
+    browser shows these verbatim in a toast."""
+    return jsonify({'error': i18n.make_t(get_lang())(msg, **params)}), status
+
 @app.context_processor
 def inject_i18n():
     """Make the translator and language metadata available to every template
@@ -209,41 +215,41 @@ def api_categories():
 def api_create_category():
     data = _json_body()
     if data is None:
-        return jsonify({'error': 'Invalid JSON body'}), 400
+        return _err('Invalid JSON body')
     name = data.get('name')
     name = name.strip() if isinstance(name, str) else ''
     if not name:
-        return jsonify({'error': 'Name required'}), 400
+        return _err('Name required')
     try:
         g.db.execute("INSERT INTO categories (name) VALUES (?)", (name,))
         g.db.commit()
         return jsonify({'success': True})
     except sqlite3.IntegrityError:
-        return jsonify({'error': 'Category already exists'}), 400
+        return _err('Category already exists')
 
 @app.route('/api/categories/<int:id>', methods=['PUT'])
 @login_required
 def api_update_category(id):
     data = _json_body()
     if data is None:
-        return jsonify({'error': 'Invalid JSON body'}), 400
+        return _err('Invalid JSON body')
     name = data.get('name')
     name = name.strip() if isinstance(name, str) else ''
     if not name:
-        return jsonify({'error': 'Name required'}), 400
+        return _err('Name required')
     try:
         g.db.execute("UPDATE categories SET name = ? WHERE id = ?", (name, id))
         g.db.commit()
         return jsonify({'success': True})
     except sqlite3.IntegrityError:
-        return jsonify({'error': 'Category already exists'}), 400
+        return _err('Category already exists')
 
 @app.route('/api/categories/<int:id>', methods=['DELETE'])
 @login_required
 def api_delete_category(id):
     used = g.db.execute("SELECT COUNT(*) as cnt FROM products WHERE category_id = ?", (id,)).fetchone()['cnt']
     if used > 0:
-        return jsonify({'error': 'Category has products assigned'}), 400
+        return _err('Category has products assigned')
     g.db.execute("DELETE FROM categories WHERE id = ?", (id,))
     g.db.commit()
     return jsonify({'success': True})
@@ -287,16 +293,16 @@ def api_products():
 def api_create_product():
     data = _json_body()
     if data is None:
-        return jsonify({'error': 'Invalid JSON body'}), 400
+        return _err('Invalid JSON body')
     fields, err = _validate_product(data)
     if err:
-        return jsonify({'error': err}), 400
+        return _err(err)
     try:
         stock_qty = int(data.get('stock_qty', 0))
     except (TypeError, ValueError):
-        return jsonify({'error': 'Stock must be a whole number'}), 400
+        return _err('Stock must be a whole number')
     if stock_qty < 0:
-        return jsonify({'error': 'Stock must be 0 or more'}), 400
+        return _err('Stock must be 0 or more')
     try:
         cur = g.db.execute("""
             INSERT INTO products (name, sku, category_id, price, stock_qty, reorder_threshold)
@@ -306,17 +312,17 @@ def api_create_product():
         g.db.commit()
         return jsonify({'success': True, 'id': cur.lastrowid})
     except sqlite3.IntegrityError:
-        return jsonify({'error': 'SKU already exists'}), 400
+        return _err('SKU already exists')
 
 @app.route('/api/products/<int:id>', methods=['PUT'])
 @login_required
 def api_update_product(id):
     data = _json_body()
     if data is None:
-        return jsonify({'error': 'Invalid JSON body'}), 400
+        return _err('Invalid JSON body')
     fields, err = _validate_product(data)
     if err:
-        return jsonify({'error': err}), 400
+        return _err(err)
     try:
         # stock_qty is deliberately not updatable here: overwriting it from a stale edit
         # form would erase concurrent sales. Stock changes go through orders and restock.
@@ -328,7 +334,7 @@ def api_update_product(id):
         g.db.commit()
         return jsonify({'success': True})
     except sqlite3.IntegrityError:
-        return jsonify({'error': 'SKU already exists'}), 400
+        return _err('SKU already exists')
 
 @app.route('/api/products/<int:id>', methods=['DELETE'])
 @login_required
@@ -343,23 +349,23 @@ def api_delete_product(id):
 def api_stock_adjust():
     data = _json_body()
     if data is None:
-        return jsonify({'error': 'Invalid JSON body'}), 400
+        return _err('Invalid JSON body')
     product_id = data.get('product_id')
     change_qty = data.get('change_qty')
     reason = data.get('reason')
     reason = reason.strip() if isinstance(reason, str) else ''
     if not product_id or not isinstance(change_qty, int) or isinstance(change_qty, bool) or change_qty == 0:
-        return jsonify({'error': 'Product ID and a non-zero whole-number quantity required'}), 400
+        return _err('Product ID and a non-zero whole-number quantity required')
     product = g.db.execute("SELECT * FROM products WHERE id = ?", (product_id,)).fetchone()
     if not product:
-        return jsonify({'error': 'Product not found'}), 404
+        return _err('Product not found', 404)
     cur = g.db.execute(
         "UPDATE products SET stock_qty = stock_qty + ?, updated_at = CURRENT_TIMESTAMP"
         " WHERE id = ? AND stock_qty + ? >= 0",
         (change_qty, product_id, change_qty))
     if cur.rowcount == 0:
         g.db.rollback()
-        return jsonify({'error': 'Insufficient stock'}), 400
+        return _err('Insufficient stock')
     new_qty = g.db.execute("SELECT stock_qty FROM products WHERE id = ?", (product_id,)).fetchone()['stock_qty']
     g.db.execute("INSERT INTO stock_logs (product_id, change_qty, reason) VALUES (?, ?, ?)", (product_id, change_qty, reason))
     g.db.commit()
@@ -415,17 +421,17 @@ def api_orders():
 def api_create_order():
     data = _json_body()
     if data is None:
-        return jsonify({'error': 'Invalid JSON body'}), 400
+        return _err('Invalid JSON body')
     items = data.get('items')
     if not isinstance(items, list) or not items:
-        return jsonify({'error': 'At least one item required'}), 400
+        return _err('At least one item required')
     for item in items:
         pid = item.get('product_id') if isinstance(item, dict) else None
         qty = item.get('quantity') if isinstance(item, dict) else None
         # bool is an int subclass: True would slip through as quantity 1
         if not isinstance(pid, int) or isinstance(pid, bool) \
                 or not isinstance(qty, int) or isinstance(qty, bool) or qty <= 0:
-            return jsonify({'error': 'Each item needs a product_id and a positive whole-number quantity'}), 400
+            return _err('Each item needs a product_id and a positive whole-number quantity')
 
     try:
         result = services.create_order(g.db, items)
@@ -472,20 +478,20 @@ def restock_page():
 def api_restock():
     data = _json_body()
     if data is None:
-        return jsonify({'error': 'Invalid JSON body'}), 400
+        return _err('Invalid JSON body')
     items = data.get('items')
     if not isinstance(items, list) or not items:
-        return jsonify({'error': 'At least one item required'}), 400
+        return _err('At least one item required')
     batch_total_cost = data.get('total_cost', 0)
     if isinstance(batch_total_cost, bool) or not isinstance(batch_total_cost, (int, float)) or not (batch_total_cost >= 0):
-        return jsonify({'error': 'Total cost must be 0 or more'}), 400
+        return _err('Total cost must be 0 or more')
     batch_total_cost = float(batch_total_cost)
     validated = []
     for item in items:
         product_id = item.get('product_id') if isinstance(item, dict) else None
         qty_added = item.get('qty') if isinstance(item, dict) else None
         if not product_id or not isinstance(qty_added, int) or isinstance(qty_added, bool) or qty_added <= 0:
-            return jsonify({'error': 'Valid product and positive whole-number quantity required'}), 400
+            return _err('Valid product and positive whole-number quantity required')
         validated.append({'product_id': product_id, 'qty': qty_added})
     try:
         services.create_restock(g.db, validated, batch_total_cost)
@@ -510,7 +516,7 @@ def api_restock_history():
         clause, params = build_date_filter(start, end, 'rb.created_at')
         query += clause
     elif period != 'all':
-        return jsonify({'error': 'invalid period'}), 400
+        return _err('invalid period')
     query += " ORDER BY rb.created_at DESC"
     batches = g.db.execute(query, params).fetchall()
     result = []
@@ -532,11 +538,12 @@ def api_restock_history():
 
 # --- Settings ---
 def _parse_whitelist(raw):
-    """Comma/space separated Telegram user IDs -> list[int]. Raises ValueError naming the bad entry."""
+    """Comma/space separated Telegram user IDs -> list[int]. Raises ValueError
+    carrying the bad entry, so the caller can build a translated message."""
     ids = []
     for tok in raw.replace(',', ' ').split():
         if not tok.lstrip('-').isdigit():
-            raise ValueError(f"'{tok}' is not a numeric Telegram user ID")
+            raise ValueError(tok)
         ids.append(int(tok))
     return ids
 
@@ -559,10 +566,10 @@ def api_settings_language():
     from database import set_setting
     data = _json_body()
     if data is None:
-        return jsonify({'error': 'Invalid JSON body'}), 400
+        return _err('Invalid JSON body')
     lang = data.get('language')
     if lang not in i18n.LANGUAGES:
-        return jsonify({'error': 'Unsupported language'}), 400
+        return _err('Unsupported language')
     set_setting(g.db, 'language', lang)
     g.db.commit()
     return jsonify({'success': True})
@@ -573,7 +580,7 @@ def api_settings_telegram():
     from database import get_setting, set_setting
     data = _json_body()
     if data is None:
-        return jsonify({'error': 'Invalid JSON body'}), 400
+        return _err('Invalid JSON body')
     enabled = bool(data.get('enabled'))
     token = data.get('token')
     token = token.strip() if isinstance(token, str) else ''
@@ -585,12 +592,12 @@ def api_settings_telegram():
     try:
         ids = _parse_whitelist(whitelist_raw)
     except ValueError as e:
-        return jsonify({'error': str(e)}), 400
+        return _err("'{token}' is not a numeric Telegram user ID", token=str(e))
     if tz_name:
         try:
             ZoneInfo(tz_name)
         except (ZoneInfoNotFoundError, ValueError):
-            return jsonify({'error': f"Unknown timezone '{tz_name}'"}), 400
+            return _err("Unknown timezone '{name}'", name=tz_name)
 
     # Stale-order alert threshold in hours. Absent -> leave unchanged; blank -> disable (0).
     alert_hours_val = None
@@ -603,15 +610,15 @@ def api_settings_telegram():
             try:
                 hours = float(s)
             except ValueError:
-                return jsonify({'error': 'Alert threshold must be a number'}), 400
+                return _err('Alert threshold must be a number')
             if hours < 0:
-                return jsonify({'error': 'Alert threshold cannot be negative'}), 400
+                return _err('Alert threshold cannot be negative')
             alert_hours_val = s
 
     # Blank token means keep the saved one; the saved value is never echoed to the browser.
     effective_token = token or get_setting(g.db, 'telegram_bot_token', '')
     if enabled and not effective_token:
-        return jsonify({'error': 'Bot token required to enable the bot'}), 400
+        return _err('Bot token required to enable the bot')
 
     set_setting(g.db, 'telegram_enabled', '1' if enabled else '0')
     if token:
@@ -622,7 +629,8 @@ def api_settings_telegram():
     if alert_hours_val is not None:
         set_setting(g.db, 'order_alert_hours', alert_hours_val)
     g.db.commit()
-    warning = 'No users whitelisted — the bot will reject everyone' if enabled and not ids else None
+    warning = (i18n.make_t(get_lang())('No users whitelisted — the bot will reject everyone')
+               if enabled and not ids else None)
     return jsonify({'success': True, 'warning': warning})
 
 @app.route('/api/settings/telegram/test', methods=['POST'])
@@ -634,13 +642,13 @@ def api_settings_telegram_test():
     token = token.strip() if isinstance(token, str) else ''
     token = token or get_setting(g.db, 'telegram_bot_token', '')
     if not token:
-        return jsonify({'error': 'No bot token saved or provided'}), 400
+        return _err('No bot token saved or provided')
     try:
         me = TelegramAPI(token, timeout=10).call('getMe')
     except TelegramError as e:
-        return jsonify({'error': f'Telegram rejected the token: {e}'}), 400
+        return _err('Telegram rejected the token: {error}', error=str(e))
     except OSError:
-        return jsonify({'error': 'Could not reach api.telegram.org'}), 400
+        return _err('Could not reach api.telegram.org')
     return jsonify({'success': True, 'bot_username': me.get('username', '')})
 
 @app.route('/api/settings/account', methods=['POST'])
@@ -649,7 +657,7 @@ def api_settings_account():
     from werkzeug.security import generate_password_hash
     data = _json_body()
     if data is None:
-        return jsonify({'error': 'Invalid JSON body'}), 400
+        return _err('Invalid JSON body')
     current = data.get('current_password') or ''
     new_username = data.get('new_username')
     new_username = new_username.strip() if isinstance(new_username, str) else ''
@@ -657,11 +665,11 @@ def api_settings_account():
 
     user = g.db.execute("SELECT * FROM users WHERE id = ?", (session['user_id'],)).fetchone()
     if not user or not check_password_hash(user['password'], current):
-        return jsonify({'error': 'Current password is incorrect'}), 400
+        return _err('Current password is incorrect')
     if not new_username and not new_password:
-        return jsonify({'error': 'Nothing to change'}), 400
+        return _err('Nothing to change')
     if new_password and len(new_password) < 6:
-        return jsonify({'error': 'New password must be at least 6 characters'}), 400
+        return _err('New password must be at least 6 characters')
 
     try:
         if new_username and new_username != user['username']:
@@ -672,7 +680,7 @@ def api_settings_account():
                          (generate_password_hash(new_password), user['id']))
         g.db.commit()
     except sqlite3.IntegrityError:
-        return jsonify({'error': 'Username already taken'}), 400
+        return _err('Username already taken')
     return jsonify({'success': True})
 
 # --- Sales Dashboard ---
@@ -701,7 +709,7 @@ def api_sales_summary():
     unit = request.args.get('unit', 'month')
     offset = _int_arg('offset')
     if offset is None:
-        return jsonify({'error': 'invalid offset'}), 400
+        return _err('invalid offset')
     tz = _client_tz(request.args.get('tz'))
     try:
         summary = services.sales_summary(g.db, unit, offset, tz)
@@ -726,11 +734,11 @@ def api_sales_trend():
     unit = request.args.get('unit', 'month')
     offset = _int_arg('offset')
     if offset is None:
-        return jsonify({'error': 'invalid offset'}), 400
+        return _err('invalid offset')
     tz = _client_tz(request.args.get('tz'))
     start, end = get_date_range(unit, offset, tz)
     if not start:
-        return jsonify({'error': 'invalid unit'}), 400
+        return _err('invalid unit')
 
     date_filter, params = build_date_filter(start, end)
     rows = g.db.execute("""
@@ -751,11 +759,14 @@ def api_sales_trend():
             key = local.strftime('%m')
         buckets[key] = buckets.get(key, 0) + r['total_amount']
 
+    lang = get_lang()
     if unit == 'month':
-        return jsonify([{'label': f'Week {k}', 'revenue': v} for k, v in sorted(buckets.items())])
+        t = i18n.make_t(lang)
+        return jsonify([{'label': t('Week {n}', n=k), 'revenue': v} for k, v in sorted(buckets.items())])
     elif unit == 'year':
-        month_names = {f"{m:02d}": n for m, n in enumerate(
-            ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'], 1)}
+        # Chart labels are built from the i18n calendar tables; strftime('%b') would
+        # follow the server's C locale instead of the shop language.
+        month_names = {f'{m:02d}': i18n.month_name(m, lang, abbr=True) for m in range(1, 13)}
         return jsonify([{'label': month_names.get(k, k), 'revenue': v} for k, v in sorted(buckets.items())])
     return jsonify([{'label': k, 'revenue': v} for k, v in sorted(buckets.items())])
 
@@ -765,11 +776,11 @@ def api_sales_top_products():
     unit = request.args.get('unit', 'month')
     offset = _int_arg('offset')
     if offset is None:
-        return jsonify({'error': 'invalid offset'}), 400
+        return _err('invalid offset')
     tz = _client_tz(request.args.get('tz'))
     start, end = get_date_range(unit, offset, tz)
     if not start:
-        return jsonify({'error': 'invalid unit'}), 400
+        return _err('invalid unit')
 
     db = g.db
     date_filter, params = build_date_filter(start, end)

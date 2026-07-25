@@ -30,11 +30,15 @@ bilingual (English / Bahasa Indonesia).
 - **Timestamps** are stored as UTC `'YYYY-MM-DD HH:MM:SS'` strings (SQLite
   `CURRENT_TIMESTAMP`). Compare against `services._to_utc_str(dt)` output — fixed
   width, so lexical string comparison is chronological.
-- **i18n:** any user-facing string is an English literal wrapped in `t(...)`.
+- **i18n:** any user-facing string is an English literal wrapped in `t(...)` —
+  including API error/warning text, which the browser shows verbatim in a toast
+  (use `app._err('English source', **params)` instead of `jsonify({'error': ...})`).
   Add the Indonesian value to `TRANSLATIONS['id']` in `i18n.py`; missing keys
-  fall back to English. Bot config (language, whitelist, token, timezone,
-  thresholds) is re-read every poll cycle, so web-UI changes apply with no
-  restart.
+  fall back to English, and `tests/test_i18n_coverage.py` scans every call site
+  to fail the suite when one is absent. Date/month labels come from
+  `i18n.month_name` / `weekday_abbr`, never `strftime('%b')`. Bot config
+  (language, whitelist, token, timezone, thresholds) is re-read every poll cycle,
+  so web-UI changes apply with no restart.
 - **Migrations** live in `init_db()` and must be idempotent (guard with
   `PRAGMA table_info` / `sqlite_master` checks). New columns go both in the
   `CREATE TABLE` block *and* a guarded `ALTER TABLE` for existing DBs.

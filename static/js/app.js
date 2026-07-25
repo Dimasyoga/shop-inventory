@@ -43,7 +43,7 @@ async function api(url, method = 'GET', body = null) {
     const res = await fetch(url, opts);
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || `Request failed (${res.status})`);
+        throw new Error(err.error || t('Request failed ({status})', { status: res.status }));
     }
     return res.json();
 }
@@ -52,7 +52,7 @@ async function api(url, method = 'GET', body = null) {
    instead of an unhandled rejection. */
 function fetchJson(url) {
     return fetch(url).then(res => {
-        if (!res.ok) throw new Error(`Request failed (${res.status})`);
+        if (!res.ok) throw new Error(t('Request failed ({status})', { status: res.status }));
         return res.json();
     }).catch(err => {
         showToast(err.message, 'error');
@@ -247,7 +247,8 @@ function deleteProduct(id) {
 
 /* ===== Orders ===== */
 function formatLocalDate(utcStr) {
-    return new Date(utcStr.replace(' ', 'T') + 'Z').toLocaleString();
+    // Explicit locale: toLocaleString() would follow the browser's language, not the shop's.
+    return new Date(utcStr.replace(' ', 'T') + 'Z').toLocaleString(DATE_LOCALE);
 }
 
 let orderItems = [];

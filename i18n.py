@@ -139,6 +139,8 @@ TRANSLATIONS = {
         'Cancel this order?': 'Batalkan pesanan ini?',
         'Order cancelled': 'Pesanan dibatalkan',
         'Order ID {id}': 'Pesanan ID {id}',
+        'No orders found': 'Tidak ada pesanan ditemukan',
+        'Stock: {n}': 'Stok: {n}',
 
         # --- Restock ---
         'New Restock': 'Restok Baru',
@@ -178,9 +180,14 @@ TRANSLATIONS = {
         'Bottom 3 Sellers': '3 Terbawah',
         'Qty Sold': 'Jml Terjual',
         'No data yet': 'Belum ada data',
+        'Week {n}': 'Minggu {n}',   # sales-trend x-axis label for the month view
 
         # --- Settings ---
         'Telegram Bot': 'Bot Telegram',
+        'Create a bot with {botfather}, paste its token here, and whitelist your Telegram user ID.':
+            'Buat bot dengan {botfather}, tempelkan tokennya di sini, dan izinkan ID pengguna Telegram Anda.',
+        'To find your ID: enable the bot, message it, and it replies with your ID.':
+            'Untuk mengetahui ID Anda: aktifkan bot, kirimi bot pesan, dan bot akan membalas dengan ID Anda.',
         'Enable bot': 'Aktifkan bot',
         'Bot token': 'Token bot',
         'Saved — leave blank to keep': 'Tersimpan — kosongkan untuk mempertahankan',
@@ -305,6 +312,51 @@ TRANSLATIONS = {
         'Cannot cancel completed orders': 'Tidak dapat membatalkan pesanan yang sudah selesai',
         'Order already cancelled': 'Pesanan sudah dibatalkan',
         'invalid unit': 'unit tidak valid',
+
+        # --- Request validation / API errors (app.py); surfaced as toasts ---
+        'Invalid JSON body': 'Isi JSON tidak valid',
+        'Name required': 'Nama wajib diisi',
+        'Price must be a number': 'Harga harus berupa angka',
+        'Price must be 0 or more': 'Harga harus 0 atau lebih',
+        'Reorder threshold must be a whole number':
+            'Ambang pemesanan ulang harus berupa bilangan bulat',
+        'Reorder threshold must be 0 or more': 'Ambang pemesanan ulang harus 0 atau lebih',
+        'Category already exists': 'Kategori sudah ada',
+        'Category has products assigned': 'Kategori masih memiliki produk',
+        'Stock must be a whole number': 'Stok harus berupa bilangan bulat',
+        'Stock must be 0 or more': 'Stok harus 0 atau lebih',
+        'SKU already exists': 'SKU sudah ada',
+        'Product ID and a non-zero whole-number quantity required':
+            'ID produk dan jumlah bilangan bulat bukan nol wajib diisi',
+        'Product not found': 'Produk tidak ditemukan',
+        'Insufficient stock': 'Stok tidak cukup',
+        'At least one item required': 'Minimal satu item wajib diisi',
+        'Each item needs a product_id and a positive whole-number quantity':
+            'Setiap item memerlukan product_id dan jumlah bilangan bulat positif',
+        'Total cost must be 0 or more': 'Total biaya harus 0 atau lebih',
+        'Valid product and positive whole-number quantity required':
+            'Produk yang valid dan jumlah bilangan bulat positif wajib diisi',
+        'invalid period': 'periode tidak valid',
+        'invalid offset': 'offset tidak valid',
+        'Unsupported language': 'Bahasa tidak didukung',
+        'Request failed ({status})': 'Permintaan gagal ({status})',
+
+        # settings errors
+        "'{token}' is not a numeric Telegram user ID":
+            "'{token}' bukan ID pengguna Telegram berupa angka",
+        "Unknown timezone '{name}'": "Zona waktu '{name}' tidak dikenal",
+        'Alert threshold must be a number': 'Ambang peringatan harus berupa angka',
+        'Alert threshold cannot be negative': 'Ambang peringatan tidak boleh negatif',
+        'Bot token required to enable the bot': 'Token bot diperlukan untuk mengaktifkan bot',
+        'No users whitelisted — the bot will reject everyone':
+            'Belum ada pengguna yang diizinkan — bot akan menolak semua orang',
+        'No bot token saved or provided': 'Tidak ada token bot yang tersimpan atau diberikan',
+        'Telegram rejected the token: {error}': 'Telegram menolak token: {error}',
+        'Could not reach api.telegram.org': 'Tidak dapat menghubungi api.telegram.org',
+        'Current password is incorrect': 'Kata sandi saat ini salah',
+        'Nothing to change': 'Tidak ada yang perlu diubah',
+        'New password must be at least 6 characters': 'Kata sandi baru minimal 6 karakter',
+        'Username already taken': 'Nama pengguna sudah dipakai',
     },
 }
 

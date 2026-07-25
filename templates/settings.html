@@ -26,9 +26,10 @@
 <div class="card">
     <h3>🤖 {{ t('Telegram Bot') }}</h3>
     <p class="help-text">
-        Create a bot with <a href="https://t.me/BotFather" target="_blank" rel="noopener">@BotFather</a>,
-        paste its token here, and whitelist your Telegram user ID.
-        To find your ID: enable the bot, message it, and it replies with your ID.
+        {# both the sentence and the anchor are literals, so |safe interpolates no user input #}
+        {{ t('Create a bot with {botfather}, paste its token here, and whitelist your Telegram user ID.',
+              botfather='<a href="https://t.me/BotFather" target="_blank" rel="noopener">@BotFather</a>') | safe }}
+        {{ t('To find your ID: enable the bot, message it, and it replies with your ID.') }}
     </p>
     <form id="telegramForm" onsubmit="saveTelegramSettings(event)">
         <div class="form-group">
