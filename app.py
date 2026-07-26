@@ -159,15 +159,11 @@ def dashboard():
         SELECT COUNT(*) as cnt FROM products
         WHERE is_archived = 0 AND stock_qty <= reorder_threshold
     """).fetchone()['cnt']
-    month_revenue = db.execute("""
-        SELECT COALESCE(SUM(total_amount), 0) as total FROM orders
-        WHERE status = 'completed' AND created_at >= date('now', '-30 days')
-    """).fetchone()['total']
-    total_restock_cost = db.execute("""
-        SELECT COALESCE(SUM(total_cost), 0) as total FROM restock_batches
-        WHERE created_at >= date('now', '-30 days')
-    """).fetchone()['total']
-    net_profit = month_revenue - total_restock_cost
+    # Same source as the sales page and the bot, so the three never disagree: the
+    # current calendar month in the shop's timezone.
+    summary = services.sales_summary(db, 'month', 0, _shop_tz())
+    month_label = '{} {}'.format(
+        i18n.month_name(summary['start'].month, get_lang()), summary['start'].year)
     total_product_value = db.execute("""
         SELECT COALESCE(SUM(price * stock_qty), 0) as total FROM products
         WHERE is_archived = 0
@@ -188,10 +184,11 @@ def dashboard():
         total_products=total_products,
         total_orders=total_orders,
         low_stock_count=low_stock,
-        month_revenue=format_rupiah(month_revenue),
-        net_profit=format_rupiah(net_profit),
+        month_label=month_label,
+        month_revenue=format_rupiah(summary['total_revenue']),
+        net_profit=format_rupiah(summary['net_profit']),
         total_product_value=format_rupiah(total_product_value),
-        total_restock_cost_raw=total_restock_cost,
+        total_restock_cost_raw=summary['restock_cost'],
         recent_orders=recent_orders,
         low_stock_products=low_stock_products,
         format_rupiah=format_rupiah
@@ -695,6 +692,12 @@ def _client_tz(name=None):
         return ZoneInfo(name) if name else timezone.utc
     except (ZoneInfoNotFoundError, ValueError):
         return timezone.utc
+
+def _shop_tz():
+    """Timezone for server-rendered date windows (the dashboard has no client `tz`
+    param to work from). Same setting the bot summaries use."""
+    from database import get_setting
+    return _client_tz(get_setting(g.db, 'shop_timezone', 'Asia/Jakarta'))
 
 def _int_arg(name, default=0):
     """Read an int query param. Returns None when unparseable so callers can 400."""

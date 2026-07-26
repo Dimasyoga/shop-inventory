@@ -232,10 +232,17 @@ def sales_summary(db, unit, offset, tz):
     if not start:
         raise ServiceError('invalid unit')
     date_filter, params = build_date_filter(start, end)
+    # Revenue/order count come from `orders` alone: joining order_items here would
+    # repeat total_amount once per line item and inflate both revenue and profit.
     row = db.execute("""
         SELECT
             COALESCE(SUM(o.total_amount), 0) as total_revenue,
-            COUNT(DISTINCT o.id) as total_orders,
+            COUNT(*) as total_orders
+        FROM orders o
+        WHERE o.status = 'completed'
+    """ + date_filter, params).fetchone()
+    items = db.execute("""
+        SELECT
             COUNT(DISTINCT oi.product_id) as unique_skus,
             COALESCE(SUM(oi.quantity), 0) as total_items_sold
         FROM orders o
@@ -252,8 +259,8 @@ def sales_summary(db, unit, offset, tz):
     return {
         'total_revenue': row['total_revenue'],
         'total_orders': row['total_orders'],
-        'unique_skus': row['unique_skus'],
-        'total_items_sold': row['total_items_sold'],
+        'unique_skus': items['unique_skus'],
+        'total_items_sold': items['total_items_sold'],
         'restock_cost': restock_cost,
         'net_profit': row['total_revenue'] - restock_cost,
         'start': start,

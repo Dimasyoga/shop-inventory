@@ -1,4 +1,6 @@
+import re
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -107,6 +109,37 @@ def test_day_summary_finds_an_order_from_seconds_ago(client, insert, product):
     assert data["total_revenue"] == 50000
 
 
+def test_summary_does_not_multiply_revenue_by_line_item_count(client, insert, product):
+    """Regression: SUM(o.total_amount) over a JOIN to order_items counted a
+    two-line order's total twice, inflating revenue and net profit."""
+    order = insert("orders", stamp(utc_now() - timedelta(seconds=5)),
+                   status="completed", total_amount=50000)
+    second = insert("products", stamp(utc_now()), name="Teh", sku="T1", price=20000, stock_qty=5)
+    import database
+    conn = database.get_db()
+    conn.executemany(
+        "INSERT INTO order_items (order_id, product_id, quantity, unit_price, subtotal)"
+        " VALUES (?,?,?,?,?)",
+        [(order, product, 1, 30000, 30000), (order, second, 2, 10000, 20000)])
+    conn.commit()
+    conn.close()
+
+    data = client.get(f"/api/sales/summary?unit=day&offset=0&tz={JAKARTA}").get_json()
+    assert data["total_revenue"] == 50000
+    assert data["total_orders"] == 1
+    assert data["unique_skus"] == 2
+    assert data["total_items_sold"] == 3
+    assert data["net_profit"] == 50000
+
+
+def test_summary_counts_a_completed_order_with_no_items(client, insert):
+    """An INNER JOIN to order_items used to drop these from revenue entirely."""
+    insert("orders", stamp(utc_now() - timedelta(seconds=5)), status="completed", total_amount=9000)
+    data = client.get(f"/api/sales/summary?unit=day&offset=0&tz={JAKARTA}").get_json()
+    assert data["total_revenue"] == 9000
+    assert data["total_orders"] == 1
+
+
 def test_summary_rejects_non_integer_offset(client):
     res = client.get("/api/sales/summary?unit=day&offset=abc")
     assert res.status_code == 400
@@ -140,3 +173,67 @@ def test_top_products_respects_day_window(client, insert, product):
     _completed_order(insert, utc_now() - timedelta(seconds=5), 3000, product)
     data = client.get(f"/api/sales/top-products?unit=day&offset=0&tz={JAKARTA}").get_json()
     assert data["top"][0]["name"] == "Kopi"
+
+
+# --- Dashboard ---
+
+# The stat cards render as a <div class="stat-value"> followed by its label; pairing
+# them lets a test read one card without matching amounts elsewhere on the page
+# (the recent-orders table also prints rupiah totals).
+STAT_CARD = re.compile(
+    r'<div class="stat-value">(.*?)</div>\s*<div class="stat-label">(.*?)</div>', re.S)
+
+
+def _dashboard_stats(client):
+    html = client.get("/").get_data(as_text=True)
+    return {label.strip(): value.strip() for value, label in STAT_CARD.findall(html)}
+
+
+def _this_month_label():
+    import i18n
+    now = datetime.now(ZoneInfo(JAKARTA))
+    return f"{i18n.month_name(now.month, 'en')} {now.year}"
+
+
+def test_dashboard_month_window_matches_the_sales_page(client, insert, product):
+    """Both must report the current calendar month in the shop timezone. The
+    dashboard used to use a rolling 30-day UTC window and disagree."""
+    jkt = ZoneInfo(JAKARTA)
+    month_start = datetime.now(jkt).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    # Both instants fall on the last day of the previous month in UTC; only Jakarta's
+    # midnight separates them, so this also pins the window to the shop timezone.
+    early_this_month = month_start + timedelta(hours=1)
+    late_last_month = month_start - timedelta(hours=1)
+
+    _completed_order(insert, early_this_month.astimezone(timezone.utc), 120000, product)
+    _completed_order(insert, late_last_month.astimezone(timezone.utc), 999000, product)
+    insert("restock_batches", stamp(early_this_month.astimezone(timezone.utc)), total_cost=20000)
+
+    api = client.get(f"/api/sales/summary?unit=month&offset=0&tz={JAKARTA}").get_json()
+    assert (api["total_revenue"], api["restock_cost"], api["net_profit"]) == (120000, 20000, 100000)
+
+    month = _this_month_label()
+    stats = _dashboard_stats(client)
+    assert stats[f"Revenue ({month})"] == "Rp 120.000"
+    assert stats[f"Restock Cost ({month})"] == "Rp 20.000"
+    assert stats[f"Net Profit ({month})"] == "Rp 100.000"
+
+
+def test_dashboard_labels_name_the_month(client):
+    assert f"Net Profit ({_this_month_label()})" in _dashboard_stats(client)
+
+
+def test_dashboard_net_profit_survives_a_multi_line_order(client, insert, product):
+    """Guards the same JOIN fan-out as the sales summary, through the rendered page."""
+    order = insert("orders", stamp(utc_now()), status="completed", total_amount=80000)
+    import database
+    conn = database.get_db()
+    conn.executemany(
+        "INSERT INTO order_items (order_id, product_id, quantity, unit_price, subtotal)"
+        " VALUES (?,?,?,?,?)",
+        [(order, product, 1, 50000, 50000), (order, product, 1, 30000, 30000)])
+    conn.commit()
+    conn.close()
+
+    stats = _dashboard_stats(client)
+    assert stats[f"Net Profit ({_this_month_label()})"] == "Rp 80.000"

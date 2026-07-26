@@ -31,7 +31,7 @@
         <div class="stat-icon">💰</div>
         <div class="stat-info">
             <div class="stat-value">{{ month_revenue }}</div>
-            <div class="stat-label">{{ t("This Month's Revenue") }}</div>
+            <div class="stat-label">{{ t('Revenue ({month})', month=month_label) }}</div>
         </div>
     </div>
 </div>
@@ -41,7 +41,7 @@
         <div class="stat-icon">📊</div>
         <div class="stat-info">
             <div class="stat-value">{{ net_profit }}</div>
-            <div class="stat-label">{{ t('Net Profit (This Month)') }}</div>
+            <div class="stat-label">{{ t('Net Profit ({month})', month=month_label) }}</div>
         </div>
     </div>
     <div class="stat-card">
@@ -55,7 +55,7 @@
         <div class="stat-icon">📥</div>
         <div class="stat-info">
             <div class="stat-value">{{ format_rupiah(total_restock_cost_raw) }}</div>
-            <div class="stat-label">{{ t('Restock Cost (This Month)') }}</div>
+            <div class="stat-label">{{ t('Restock Cost ({month})', month=month_label) }}</div>
         </div>
     </div>
 </div>
