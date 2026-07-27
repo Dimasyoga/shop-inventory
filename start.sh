@@ -1,10 +1,9 @@
 #!/bin/bash
-# Shop Inventory System - Startup Script
+# Shop Inventory System - local development launcher.
+# For a real deployment use Docker instead: see the Deployment section of README.md.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
-
-export PATH="/home/phoe/.local/bin:$PATH"
 
 # Create virtual environment if not exists
 if [ ! -d "venv" ]; then

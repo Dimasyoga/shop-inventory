@@ -5,7 +5,7 @@ Orientation for the next agent working on this repo. Read this, then skim
 
 ## What this is
 
-A Flask + SQLite shop-inventory app (Python 3.14) with a Jinja/vanilla-JS web UI
+A Flask + SQLite shop-inventory app (Python 3.13) with a Jinja/vanilla-JS web UI
 and a long-polling Telegram bot. Currency is Indonesian Rupiah. UI + bot are
 bilingual (English / Bahasa Indonesia).
 
@@ -13,7 +13,8 @@ bilingual (English / Bahasa Indonesia).
 
 | File | Responsibility |
 |---|---|
-| `app.py` | Flask routes, request validation, session/auth. Starts `BotPoller` in `__main__`. |
+| `app.py` | Flask routes, request validation, session/auth. `bootstrap()` does logging + `init_db()` + `BotPoller`. |
+| `wsgi.py` | Gunicorn entrypoint. Calls `bootstrap()`; importing `app:app` directly would skip it. |
 | `services.py` | Business logic shared by web routes **and** the bot. Each function takes an open sqlite3 connection, owns its transaction, and raises `ServiceError`/`NotFoundError`. |
 | `telegram_bot.py` | Bot API client, screen renderers, stateful order/restock flows, and the `BotPoller` daemon thread. Must **not** import `app.py`. |
 | `database.py` | Schema (`init_db`), idempotent migrations, `get_setting`/`set_setting`, DB connection. |
@@ -26,7 +27,13 @@ bilingual (English / Bahasa Indonesia).
 
 - **Settings** are string key/value rows in the `settings` table. Read with
   `get_setting(db, key, default)`, write with `set_setting(db, key, value)`
-  (does **not** commit — caller owns the transaction).
+  (does **not** commit — caller owns the transaction). Keys listed in
+  `database.ENCRYPTED_SETTINGS` (currently just `telegram_bot_token`) are held
+  encrypted at rest as `enc:v1:…` and must go through `get_secret_setting` /
+  `set_secret_setting` instead; adding a key to that tuple also migrates any
+  existing plaintext value on the next `init_db()`. Reads tolerate un-prefixed
+  legacy values, and a key mismatch returns `''` with an ERROR log rather than
+  raising — losing the key must never take the web UI down.
 - **Timestamps** are stored as UTC `'YYYY-MM-DD HH:MM:SS'` strings (SQLite
   `CURRENT_TIMESTAMP`). Compare against `services._to_utc_str(dt)` output — fixed
   width, so lexical string comparison is chronological.
@@ -52,7 +59,27 @@ bilingual (English / Bahasa Indonesia).
 ```bash
 bash start.sh            # or: python3 app.py  (serves http://localhost:5000)
 source venv/bin/activate && python -m pytest -q   # full suite
+docker compose up -d --build   # deployment path; ./deploy.sh to update
 ```
 
-Default login `admin` / `admin123`. `FLASK_DEBUG=1 ./start.sh` enables the
+Default login `admin` / `admin123` (override with `SHOP_ADMIN_USERNAME` /
+`SHOP_ADMIN_PASSWORD` before first start). `FLASK_DEBUG=1 ./start.sh` enables the
 Werkzeug debugger (never on an untrusted network).
+
+## Deployment constraints (don't break these)
+
+- **One worker, always.** `BotPoller` is an in-process thread holding a single
+  `getUpdates` offset and the store is one SQLite file, so a second worker or
+  replica duplicates every bot message and doubles stale-order alerts. Scale with
+  `--threads`. This is why the Dockerfile pins `--workers 1`.
+- **State lives outside the source tree.** `SHOP_DB_PATH` and
+  `SHOP_SECRET_KEY_PATH` point into the `/data` volume. Keep `database.DB_PATH` a
+  module-level name read at call time inside `get_db()` — `tests/conftest.py`
+  monkeypatches it, and moving the lookup into a config object breaks the suite.
+- **Anything a deployment must set goes in `.env.example`**; anything the shop
+  owner should change while running stays a `settings` row (re-read every poll
+  cycle, so no restart).
+- `/healthz` is unauthenticated and returns untranslated JSON on purpose — it is
+  the container healthcheck, and `t(...)` there would trip the i18n coverage test.
+- New runtime assets must be vendored into `static/`, not pulled from a CDN: the
+  shop's network may be offline.

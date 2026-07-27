@@ -15,6 +15,11 @@ def db_path(tmp_path, monkeypatch):
     """
     path = tmp_path / "test.db"
     monkeypatch.setattr(database, "DB_PATH", str(path))
+    # Per-test encryption key, so runs stay independent and no .encryption_key is
+    # written into the source tree. SHOP_ENCRYPTION_KEY would override the path,
+    # so clear it in case the developer has one exported.
+    monkeypatch.delenv("SHOP_ENCRYPTION_KEY", raising=False)
+    monkeypatch.setattr(database, "ENCRYPTION_KEY_PATH", str(tmp_path / "test.key"))
     database.init_db()
     return str(path)
 

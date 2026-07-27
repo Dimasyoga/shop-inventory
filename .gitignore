@@ -1,5 +1,10 @@
 shop.db
+shop.db-wal
+shop.db-shm
 .secret_key
+.encryption_key
+.env
+backups/
 *.pyc
 venv/
 __pycache__

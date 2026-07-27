@@ -105,20 +105,24 @@ shop-inventory/
 
 ## 2. Setup
 
+> Deploying this for real? Skip to [section 4, Deployment](#4-deployment). This
+> section covers local development only.
+
 ### Prerequisites
-- Python 3.14+ installed
+- Python 3.13+ installed
 - pip available
 
 ### Install Dependencies
 ```bash
-pip install flask
+pip install -r requirements.txt
 ```
 
 ### Database Setup
 The database is created automatically on first run. `database.py` handles:
 - Creating all tables if they don't exist
 - Migrating new tables (`restock_batches`, `restock_items`) to existing databases
-- Seeding default admin user (`admin` / `admin123`)
+- Seeding the first user (`admin` / `admin123`, or `SHOP_ADMIN_USERNAME` /
+  `SHOP_ADMIN_PASSWORD` if set — only ever on an empty database)
 
 ### Database Schema
 | Table | Purpose |
@@ -186,7 +190,119 @@ The server starts at `http://localhost:5000`. Default login: **admin** / **admin
 
 ---
 
-## 4. Workflow Explanations
+## 4. Deployment
+
+Docker is the supported deployment path. `start.sh` and `python3 app.py` run the
+Werkzeug development server and are for local development only.
+
+### First-time setup
+
+```bash
+cp .env.example .env
+# Edit .env and set SHOP_ADMIN_PASSWORD before the first start.
+docker compose up -d --build
+```
+
+The app is then on `http://<machine-ip>:5000` (change with `HOST_PORT` in `.env`).
+It restarts automatically after a reboot.
+
+Configure the Telegram bot afterwards in the web UI at **Settings** — the token,
+chat whitelist, timezone and stale-order threshold are database settings, re-read
+every poll cycle, so they apply without a restart.
+
+### Updating after you push a new feature
+
+```bash
+./deploy.sh
+```
+
+That backs up the database, pulls, rebuilds, restarts, and waits for the health
+check — failing loudly with logs if the new version doesn't come up.
+
+### Where the data lives
+
+`shop.db` and `.secret_key` live in the `shop-data` Docker volume mounted at
+`/data`, deliberately outside the source tree: rebuilds, `git pull` and `git clean`
+cannot touch them. Deleting that volume deletes the inventory.
+
+### Backups
+
+```bash
+./backup.sh              # writes backups/shop-<timestamp>.db
+```
+
+Uses SQLite's online backup API, so it is safe to run while the shop is using the
+app — unlike `cp`, which can capture a torn file. `backup.sh` prints the restore
+command. The Telegram bot token inside is encrypted and the key is not included,
+so a backup that goes astray does not leak the bot (see
+[Secrets at rest](#secrets-at-rest)). Worth putting in cron:
+
+```
+0 22 * * * cd /path/to/shop-inventory && ./backup.sh >> backups/backup.log 2>&1
+```
+
+### Secrets at rest
+
+The Telegram bot token is encrypted (Fernet) before it is written to the
+`settings` table, stored as `enc:v1:…`. An existing database with a plaintext
+token is upgraded in place on the next start — nothing to do by hand.
+
+The key comes from `SHOP_ENCRYPTION_KEY`, or is generated once into
+`/data/.encryption_key` (mode `0600`). **`backup.sh` copies only `shop.db`, so
+the key is never inside a backup** — that is the point: a `.db` file that ends up
+on a laptop or in cloud storage cannot be decrypted.
+
+This protects copies of the database. It cannot protect against someone who can
+already read the server or the container, since the app itself must be able to
+decrypt — that is inherent, not a gap in the setup.
+
+**Losing the key is recoverable, not fatal.** If the database is restored without
+its key, the app logs `cannot decrypt setting 'telegram_bot_token'`, the bot
+idles as though unconfigured, and the web UI keeps working normally — re-enter
+the token in Settings. To avoid that entirely, set `SHOP_ENCRYPTION_KEY` in
+`.env` and keep a copy in a password manager:
+
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+### Configuration
+
+All variables are documented in `.env.example`. Summary:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `SHOP_ADMIN_USERNAME` / `SHOP_ADMIN_PASSWORD` | `admin` / `admin123` | Seeds the first user; only applies to an empty database |
+| `SHOP_SECRET_KEY` | auto-generated | Session signing key; persisted to `/data` if unset |
+| `SHOP_ENCRYPTION_KEY` | auto-generated | Encrypts the bot token at rest; persisted to `/data` if unset |
+| `SHOP_DB_PATH` / `SHOP_SECRET_KEY_PATH` / `SHOP_ENCRYPTION_KEY_PATH` | `/data/...` | State locations |
+| `HOST_PORT` | `5000` | Host port to publish |
+| `LOG_LEVEL` | `INFO` | Log verbosity |
+| `SHOP_ENABLE_BOT` | `1` | Set `0` to run the web UI without the Telegram poller |
+
+### Operational notes
+
+- **Health check:** `GET /healthz` (unauthenticated) returns `{"status":"ok"}`.
+  Compose uses it, and `docker compose ps` will show `(healthy)`.
+- **Exactly one worker, by design.** The Telegram poller is an in-process thread
+  holding a single `getUpdates` offset, and the store is one SQLite file. A second
+  worker or replica duplicates every bot message and doubles the stale-order
+  alerts. Scale with `--threads`, never `--workers`.
+- **This is a LAN deployment.** There is no TLS and session cookies are not marked
+  `Secure`. Don't port-forward it to the internet without putting a reverse proxy
+  with HTTPS in front and setting `SESSION_COOKIE_SECURE`.
+- **Never set `FLASK_DEBUG`** on a deployed instance — it exposes the Werkzeug
+  console, which is remote code execution for anyone who can reach the port.
+
+### Logs
+
+```bash
+docker compose logs -f app
+```
+
+---
+
+## 5. Workflow Explanations
 
 ### Creating an Order
 

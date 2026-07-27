@@ -107,5 +107,7 @@
     </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+{# Vendored (Chart.js 4.4.7) so the charts still render on a shop network with
+   no internet. Update by re-downloading into static/js/vendor/. #}
+<script src="{{ url_for('static', filename='js/vendor/chart.umd.min.js') }}"></script>
 {% endblock %}

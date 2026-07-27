@@ -10,6 +10,14 @@ def get_setting(key):
     return val
 
 
+def get_secret(key):
+    """Decrypted value of a setting stored encrypted at rest."""
+    conn = database.get_db()
+    val = database.get_secret_setting(conn, key)
+    conn.close()
+    return val
+
+
 # --- Telegram settings ---
 
 def test_telegram_settings_round_trip(client):
@@ -17,7 +25,7 @@ def test_telegram_settings_round_trip(client):
         "enabled": True, "token": "123:ABC", "whitelist": "111, 222", "timezone": "Asia/Jakarta"})
     assert res.status_code == 200
     assert get_setting("telegram_enabled") == "1"
-    assert get_setting("telegram_bot_token") == "123:ABC"
+    assert get_secret("telegram_bot_token") == "123:ABC"
     assert get_setting("telegram_whitelist") == "111,222"
     assert get_setting("shop_timezone") == "Asia/Jakarta"
 
@@ -26,7 +34,7 @@ def test_blank_token_keeps_saved_value(client):
     client.post("/api/settings/telegram", json={"enabled": True, "token": "123:ABC", "whitelist": "1"})
     res = client.post("/api/settings/telegram", json={"enabled": True, "token": "", "whitelist": "1"})
     assert res.status_code == 200
-    assert get_setting("telegram_bot_token") == "123:ABC"
+    assert get_secret("telegram_bot_token") == "123:ABC"
 
 
 def test_bad_whitelist_entry_rejected(client):

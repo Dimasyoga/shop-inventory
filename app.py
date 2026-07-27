@@ -4,6 +4,7 @@ from functools import wraps
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from werkzeug.security import check_password_hash
+import logging
 import sqlite3
 import os
 import secrets
@@ -14,10 +15,18 @@ from services import (ServiceError, format_rupiah, get_date_range,
                       build_date_filter, _to_utc_str)
 from telegram_bot import TelegramAPI, TelegramError
 
-_SECRET_PATH = os.path.join(os.path.dirname(__file__), '.secret_key')
+log = logging.getLogger('app')
+
+# Defaults keep local dev writing beside the source; a deployment points both
+# SHOP_DB_PATH and this at a mounted volume so the source tree stays read-only.
+_SECRET_PATH = (os.environ.get('SHOP_SECRET_KEY_PATH')
+                or os.path.join(os.path.dirname(__file__), '.secret_key'))
 
 def _load_secret_key():
     """Persisted random secret so sessions survive restarts without a key in the repo."""
+    env_key = os.environ.get('SHOP_SECRET_KEY')
+    if env_key:
+        return env_key.encode()
     try:
         with open(_SECRET_PATH, 'rb') as f:
             key = f.read()
@@ -26,6 +35,7 @@ def _load_secret_key():
     except FileNotFoundError:
         pass
     key = secrets.token_bytes(32)
+    os.makedirs(os.path.dirname(_SECRET_PATH) or '.', exist_ok=True)
     fd = os.open(_SECRET_PATH, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, 'wb') as f:
         f.write(key)
@@ -100,6 +110,17 @@ def close_db(exc):
     db = g.pop('db', None)
     if db is not None:
         db.close()
+
+@app.route('/healthz')
+def healthz():
+    """Liveness probe for the container healthcheck. Deliberately unauthenticated,
+    and returns raw JSON rather than translated text so it stays machine-readable."""
+    try:
+        g.db.execute("SELECT 1 FROM settings LIMIT 1").fetchone()
+    except sqlite3.Error as e:
+        log.warning('health check failed: %s', e)
+        return jsonify({'status': 'error'}), 503
+    return jsonify({'status': 'ok'})
 
 def get_lang():
     """Active shop-wide UI language, resolved to a supported code."""
@@ -547,10 +568,12 @@ def _parse_whitelist(raw):
 @app.route('/settings')
 @login_required
 def settings_page():
-    from database import get_setting
+    from database import get_setting, get_secret_setting
     return render_template('settings.html',
         telegram_enabled=get_setting(g.db, 'telegram_enabled', '0') == '1',
-        token_set=bool(get_setting(g.db, 'telegram_bot_token', '')),
+        # Decrypted rather than a bare presence check, so a token the app can no
+        # longer read shows as unset instead of claiming a working bot.
+        token_set=bool(get_secret_setting(g.db, 'telegram_bot_token')),
         whitelist=get_setting(g.db, 'telegram_whitelist', ''),
         shop_timezone=get_setting(g.db, 'shop_timezone', 'Asia/Jakarta'),
         order_alert_hours=get_setting(g.db, 'order_alert_hours', '24'),
@@ -574,7 +597,7 @@ def api_settings_language():
 @app.route('/api/settings/telegram', methods=['POST'])
 @login_required
 def api_settings_telegram():
-    from database import get_setting, set_setting
+    from database import get_setting, set_setting, get_secret_setting, set_secret_setting
     data = _json_body()
     if data is None:
         return _err('Invalid JSON body')
@@ -613,13 +636,13 @@ def api_settings_telegram():
             alert_hours_val = s
 
     # Blank token means keep the saved one; the saved value is never echoed to the browser.
-    effective_token = token or get_setting(g.db, 'telegram_bot_token', '')
+    effective_token = token or get_secret_setting(g.db, 'telegram_bot_token')
     if enabled and not effective_token:
         return _err('Bot token required to enable the bot')
 
     set_setting(g.db, 'telegram_enabled', '1' if enabled else '0')
     if token:
-        set_setting(g.db, 'telegram_bot_token', token)
+        set_secret_setting(g.db, 'telegram_bot_token', token)
     set_setting(g.db, 'telegram_whitelist', ','.join(str(i) for i in ids))
     if tz_name:
         set_setting(g.db, 'shop_timezone', tz_name)
@@ -633,11 +656,11 @@ def api_settings_telegram():
 @app.route('/api/settings/telegram/test', methods=['POST'])
 @login_required
 def api_settings_telegram_test():
-    from database import get_setting
+    from database import get_secret_setting
     data = _json_body() or {}
     token = data.get('token')
     token = token.strip() if isinstance(token, str) else ''
-    token = token or get_setting(g.db, 'telegram_bot_token', '')
+    token = token or get_secret_setting(g.db, 'telegram_bot_token')
     if not token:
         return _err('No bot token saved or provided')
     try:
@@ -801,14 +824,36 @@ def api_sales_top_products():
         'bottom': [{'id': r['id'], 'name': r['name'], 'sku': r['sku'], 'total_sold': r['total_sold'], 'total_revenue': r['total_revenue']} for r in bottom]
     })
 
-if __name__ == '__main__':
+def _configure_logging():
+    """Attach a timestamped stderr handler. Without this the module loggers fall
+    back to Python's lastResort handler, which drops INFO entirely -- so nothing
+    ever confirmed the bot poller had started."""
+    logging.basicConfig(
+        level=os.environ.get('LOG_LEVEL', 'INFO').upper(),
+        format='%(asctime)s %(levelname)s %(name)s %(message)s',
+    )
+
+def bootstrap(start_bot=True):
+    """Prepare a process to serve: logging, migrations, then the bot poller.
+
+    Both the dev server and the WSGI entrypoint (wsgi.py) go through here, so a
+    deployment can never end up with an unmigrated database or a dead bot. Call
+    once per process: the poller is an in-process thread holding a single
+    getUpdates offset, so a second one duplicates every Telegram message.
+    """
+    _configure_logging()
     init_db()
+    if start_bot and os.environ.get('SHOP_ENABLE_BOT', '1').lower() not in ('0', 'false', 'no'):
+        from telegram_bot import BotPoller
+        BotPoller().start()
+
+if __name__ == '__main__':
     # debug exposes the Werkzeug console (remote code execution) to anyone on the
     # network; it must never default on for a 0.0.0.0 bind.
     debug = os.environ.get('FLASK_DEBUG', '').lower() in ('1', 'true', 'yes')
     # With the reloader active, only the child process serves requests; the
     # WERKZEUG_RUN_MAIN guard stops the parent from starting a second poller.
-    if not debug or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
-        from telegram_bot import BotPoller
-        BotPoller().start()
-    app.run(host='0.0.0.0', port=5000, debug=debug)
+    bootstrap(start_bot=not debug or os.environ.get('WERKZEUG_RUN_MAIN') == 'true')
+    app.run(host=os.environ.get('HOST', '0.0.0.0'),
+            port=int(os.environ.get('PORT', '5000')),
+            debug=debug)

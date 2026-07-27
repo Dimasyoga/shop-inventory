@@ -122,7 +122,7 @@ def parse_alert_hours(raw):
 
 
 def load_bot_config(db):
-    from database import get_setting
+    from database import get_setting, get_secret_setting
     tz_name = get_setting(db, 'shop_timezone', 'Asia/Jakarta')
     try:
         tz = ZoneInfo(tz_name)
@@ -130,7 +130,7 @@ def load_bot_config(db):
         tz = timezone.utc  # never crash the poller over a bad setting
     return BotConfig(
         enabled=get_setting(db, 'telegram_enabled', '0') == '1',
-        token=get_setting(db, 'telegram_bot_token', '') or '',
+        token=get_secret_setting(db, 'telegram_bot_token') or '',
         whitelist=parse_whitelist(get_setting(db, 'telegram_whitelist', '')),
         tz=tz,
         alert_hours=parse_alert_hours(get_setting(db, 'order_alert_hours', '24')))

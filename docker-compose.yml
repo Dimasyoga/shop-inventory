@@ -1,0 +1,25 @@
+services:
+  app:
+    build: .
+    image: shop-inventory
+    container_name: shop-inventory
+    # Survives a shop-machine reboot without anyone logging in to start it.
+    restart: unless-stopped
+    ports:
+      - "${HOST_PORT:-5000}:5000"
+    env_file:
+      - .env
+    volumes:
+      # shop.db and .secret_key both live here. Deleting this volume deletes the
+      # inventory; rebuilding the image does not touch it.
+      - shop-data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:5000/healthz', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
+      retries: 3
+
+volumes:
+  shop-data:

@@ -1,0 +1,17 @@
+.git/
+.github/
+venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+tests/
+
+# Local state. These belong in the mounted volume, never baked into the image.
+shop.db
+shop.db-wal
+shop.db-shm
+.secret_key
+.encryption_key
+.env
+backups/
