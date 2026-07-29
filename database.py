@@ -198,6 +198,24 @@ def init_db():
             FOREIGN KEY (batch_id) REFERENCES restock_batches(id),
             FOREIGN KEY (product_id) REFERENCES products(id)
         );
+
+        CREATE TABLE IF NOT EXISTS self_use_batches (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            total_value REAL NOT NULL DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS self_use_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            batch_id INTEGER NOT NULL,
+            product_id INTEGER NOT NULL,
+            quantity INTEGER NOT NULL,
+            unit_price REAL NOT NULL,
+            subtotal REAL NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (batch_id) REFERENCES self_use_batches(id),
+            FOREIGN KEY (product_id) REFERENCES products(id)
+        );
     ''')
 
     # Migrate: add new tables if not exists

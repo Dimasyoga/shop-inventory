@@ -16,8 +16,9 @@ A Flask-based shop inventory management system built with Python 3.14, SQLite, a
 - Product catalog with categories, SKU, pricing, and stock tracking
 - Order management with lifecycle: draft → confirmed → completed (or cancelled)
 - Batch-level restock system with cost allocation
+- Self-use tracking for stock the seller takes for themself (no revenue)
 - Sales dashboard with period-based analytics and trend charts
-- Stock audit logging on every sale and restock
+- Stock audit logging on every sale, restock, and self use
 - Low stock alerts and reorder thresholds
 - Telegram bot with button-driven menus and stale-order alerts (see below)
 - Bilingual interface — English and Bahasa Indonesia (see below)
@@ -41,9 +42,9 @@ server locale, so month and weekday names are localized too.
 
 ### Telegram Bot
 
-Manage the shop from Telegram: browse products, walk through creating orders and
-restocks, confirm/complete/cancel orders, and check the sales summary — all via
-tap-through inline menus.
+Manage the shop from Telegram: browse products, walk through creating orders,
+restocks and self-use entries, confirm/complete/cancel orders, and check the
+sales summary — all via tap-through inline menus.
 
 Setup:
 1. Create a bot with [@BotFather](https://t.me/BotFather) and copy its token.
@@ -97,6 +98,7 @@ shop-inventory/
     ├── products.html   # Product catalog with stock management
     ├── orders.html     # Order creation and lifecycle
     ├── restock.html    # Batch restock with cost tracking
+    ├── selfuse.html    # Seller's own consumption (stock out, no revenue)
     ├── sales.html      # Sales analytics dashboard
     └── settings.html   # Language, Telegram bot config + account management
 ```
@@ -120,7 +122,8 @@ pip install -r requirements.txt
 ### Database Setup
 The database is created automatically on first run. `database.py` handles:
 - Creating all tables if they don't exist
-- Migrating new tables (`restock_batches`, `restock_items`) to existing databases
+- Migrating new tables (`restock_batches`, `restock_items`, `self_use_batches`,
+  `self_use_items`) to existing databases
 - Seeding the first user (`admin` / `admin123`, or `SHOP_ADMIN_USERNAME` /
   `SHOP_ADMIN_PASSWORD` if set — only ever on an empty database)
 
@@ -135,6 +138,8 @@ The database is created automatically on first run. `database.py` handles:
 | `order_items` | Order line items |
 | `restock_batches` | Restock batch header (total cost per batch) |
 | `restock_items` | Restock line items (product, qty, allocated cost) |
+| `self_use_batches` | Self-use batch header (total retail value per batch) |
+| `self_use_items` | Self-use line items (product, qty, price snapshot, subtotal) |
 
 ---
 
@@ -155,7 +160,7 @@ The server starts at `http://localhost:5000`. Default login: **admin** / **admin
 
 #### Dashboard (`/`)
 - **Stats**: Total products, total orders, low stock count, this month's revenue
-- **Financials**: Net profit (revenue − restock cost), total product value (price × stock), restock cost
+- **Financials**: Net profit (revenue − restock cost), total product value (price × stock), restock cost, self use
 - **Recent Orders**: Last 5 orders with status and amount
 - **Low Stock Alerts**: Products at or below reorder threshold
 
@@ -182,9 +187,21 @@ The server starts at `http://localhost:5000`. Default login: **admin** / **admin
 - Expandable history: click a batch row to see product breakdown
 - Period filter: Today, This Week, This Month, All Time
 
+#### Self Use (`/self-use`)
+- Records stock the seller takes for themself: one product or several per batch
+- Reduces stock and writes a `stock_logs` row, exactly like a sale — but creates
+  no order and no revenue
+- Each line is valued at the product's retail price **at the time of entry**, so
+  later price edits never move historical figures
+- **Self use does not affect revenue or net profit.** The money was already
+  booked as restock spend when the goods were bought, so deducting their value
+  from profit again would double-count. It is reported as its own metric on the
+  dashboard, the sales page, and the bot summary
+- Expandable history with the same period filters as Restock
+
 #### Sales Dashboard (`/sales`)
 - Period selector: Today, This Week, This Month, This Year, All Time
-- **Summary stats**: Revenue, completed orders, unique SKUs, items sold, restock cost, net profit, product value
+- **Summary stats**: Revenue, completed orders, unique SKUs, items sold, restock cost, net profit, product value, self use
 - **Trend chart**: Daily revenue line chart (Chart.js)
 - **Top 3 / Bottom 3 sellers**: By quantity sold
 
@@ -344,6 +361,23 @@ docker compose logs -f app
 7. Restock cost appears in dashboard and sales dashboard, used for net profit calculation
 8. History shows batches; click any row to expand and see product-level breakdown
 
+### Recording Self Use
+
+1. Navigate to **Self Use** page
+2. Click **+ Add Product** for each product taken; select product and quantity
+3. **Total Value** updates live from the products' retail prices — there is
+   nothing to type, since no money changes hands
+4. Click **Submit Self Use**
+5. The system:
+   - Creates a batch record with the total retail value
+   - Decrements each product's stock (rejecting the whole batch if any line
+     would go below zero)
+   - Records one row per product in `self_use_items` with the price snapshot
+   - Writes a negative `stock_logs` row with reason `self use batch #N`
+6. The value appears as its own dashboard card and never changes revenue,
+   restock cost, or net profit
+7. History shows batches; click any row to expand and see product-level breakdown
+
 ### Order Lifecycle Diagram
 
 ```
@@ -370,3 +404,12 @@ Batch Restock (total: Rp 500,000)
 
 Net Profit = Revenue − Restock Cost (from restock_batches)
 ```
+
+### Stock Movements at a Glance
+
+| Action | Stock | Money recorded | In net profit? |
+|---|---|---|---|
+| Order completed | ↓ | Revenue (`orders.total_amount`) | Yes, as revenue |
+| Restock | ↑ | Cost (`restock_batches.total_cost`) | Yes, subtracted |
+| Self use | ↓ | Retail value (`self_use_batches.total_value`) | **No** — reported separately |
+| Stock adjust | ↕ | none | No |

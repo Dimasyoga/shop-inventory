@@ -25,7 +25,7 @@
 
 <div class="card">
     <h3>{{ t('Restock History') }}</h3>
-    <div class="period-selector" style="margin-bottom:16px">
+    <div class="period-selector" data-history="restock" style="margin-bottom:16px">
         <button class="btn btn-period active" data-period="all">{{ t('All Time') }}</button>
         <button class="btn btn-period" data-period="today">{{ t('Today') }}</button>
         <button class="btn btn-period" data-period="week">{{ t('This Week') }}</button>
@@ -43,7 +43,5 @@
 
 <script>
 const PRODUCTS = {{ products_json | tojson }};
-
-let restockPeriod = 'all';
 </script>
 {% endblock %}

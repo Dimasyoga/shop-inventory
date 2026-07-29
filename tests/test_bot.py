@@ -326,6 +326,79 @@ def test_restock_flow_with_cost_text(bot):
     assert log["reason"] == f"restock batch #{batch['id']}"
 
 
+# --- Self use flow ---
+
+def test_self_use_button_on_main_menu(bot):
+    api, drive = bot
+    drive(text_update("/start"))
+    assert "su" in api.buttons()
+
+
+def test_self_use_flow_saves_batch_and_logs(bot):
+    api, drive = bot
+    pid = make_product(stock=10, price=5000)
+    drive(cb_update("su"))
+    drive(cb_update(f"su:i:{pid}"))
+    drive(cb_update("su:q:2"))
+    drive(cb_update("su:d"))             # straight to review: no cost prompt
+    assert "10.000" in api.last_text()   # 2 x Rp 5.000 valued at retail price
+    assert "su:!" in api.buttons()
+    drive(cb_update("su:!"))
+
+    assert db_one("SELECT stock_qty FROM products WHERE id=?", (pid,))["stock_qty"] == 8
+    batch = db_one("SELECT * FROM self_use_batches")
+    assert batch["total_value"] == 10000
+    log = db_one("SELECT change_qty, reason FROM stock_logs WHERE product_id=?", (pid,))
+    assert log["change_qty"] == -2
+    assert log["reason"] == f"self use batch #{batch['id']}"
+    assert drive.states.get(CHAT) is None
+
+
+def test_self_use_flow_shows_stock_in_the_picker(bot):
+    api, drive = bot
+    make_product(stock=7, name="Kopi")
+    drive(cb_update("su"))
+    assert any("(7)" in b for b in api.buttons_text())
+
+
+def test_self_use_flow_rejects_oversell(bot):
+    api, drive = bot
+    pid = make_product(stock=1)
+    drive(cb_update("su"))
+    drive(cb_update(f"su:i:{pid}"))
+    drive(cb_update("su:q:5"))
+    drive(cb_update("su:d"))
+    drive(cb_update("su:!"))
+
+    alerts = [p for p in api.sent("answerCallbackQuery") if p["show_alert"]]
+    assert alerts and "Insufficient stock" in alerts[-1]["text"]
+    assert db_one("SELECT COUNT(*) AS cnt FROM self_use_batches")["cnt"] == 0
+    assert db_one("SELECT stock_qty FROM products WHERE id=?", (pid,))["stock_qty"] == 1
+
+
+def test_self_use_abandon_clears_state(bot):
+    api, drive = bot
+    make_product()
+    drive(cb_update("su"))
+    drive(cb_update("su:c"))
+    assert drive.states.get(CHAT) is None
+
+
+def test_summary_shows_self_use_line(bot):
+    api, drive = bot
+    pid = make_product(stock=10, price=5000)
+    drive(cb_update("su"))
+    drive(cb_update(f"su:i:{pid}"))
+    drive(cb_update("su:q:2"))
+    drive(cb_update("su:d"))
+    drive(cb_update("su:!"))
+
+    drive(cb_update("s:d:0"))
+    text = api.last_text()
+    assert "Self use: Rp 10.000" in text
+    assert "Net profit: Rp 0" in text  # self use never enters profit
+
+
 def test_parse_cost():
     assert parse_cost("150000") == 150000
     assert parse_cost("Rp 150.000") == 150000

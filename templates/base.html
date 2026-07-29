@@ -18,6 +18,7 @@
             <li><a href="{{ url_for('categories_page') }}" class="{% if request.endpoint == 'categories_page' %}active{% endif %}">🏷️ {{ t('Categories') }}</a></li>
             <li><a href="{{ url_for('orders_page') }}" class="{% if request.endpoint == 'orders_page' %}active{% endif %}">🛒 {{ t('Orders') }}</a></li>
             <li><a href="{{ url_for('restock_page') }}" class="{% if request.endpoint == 'restock_page' %}active{% endif %}">📥 {{ t('Restock') }}</a></li>
+            <li><a href="{{ url_for('self_use_page') }}" class="{% if request.endpoint == 'self_use_page' %}active{% endif %}">🏠 {{ t('Self Use') }}</a></li>
             <li><a href="{{ url_for('sales_page') }}" class="{% if request.endpoint == 'sales_page' %}active{% endif %}">📈 {{ t('Sales') }}</a></li>
             <li><a href="{{ url_for('settings_page') }}" class="{% if request.endpoint == 'settings_page' %}active{% endif %}">⚙️ {{ t('Settings') }}</a></li>
         </ul>

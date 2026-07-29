@@ -208,6 +208,7 @@ def dashboard():
         month_label=month_label,
         month_revenue=format_rupiah(summary['total_revenue']),
         net_profit=format_rupiah(summary['net_profit']),
+        self_use_value=format_rupiah(summary['self_use_value']),
         total_product_value=format_rupiah(total_product_value),
         total_restock_cost_raw=summary['restock_cost'],
         recent_orders=recent_orders,
@@ -554,6 +555,77 @@ def api_restock_history():
         })
     return jsonify(result)
 
+# --- Self Use ---
+@app.route('/self-use')
+@login_required
+def self_use_page():
+    # stock_qty > 0 like the orders page: self use takes stock out, so a product
+    # already at zero cannot be picked (restock uses >= 0 because it puts stock in).
+    products = g.db.execute(
+        "SELECT * FROM products WHERE is_archived = 0 AND stock_qty > 0 ORDER BY name").fetchall()
+    return render_template('selfuse.html', products_json=_products_json(products),
+                           format_rupiah=format_rupiah)
+
+@app.route('/api/self-use', methods=['POST'])
+@login_required
+def api_self_use():
+    data = _json_body()
+    if data is None:
+        return _err('Invalid JSON body')
+    items = data.get('items')
+    if not isinstance(items, list) or not items:
+        return _err('At least one item required')
+    validated = []
+    for item in items:
+        product_id = item.get('product_id') if isinstance(item, dict) else None
+        qty = item.get('qty') if isinstance(item, dict) else None
+        if not product_id or not isinstance(qty, int) or isinstance(qty, bool) or qty <= 0:
+            return _err('Valid product and positive whole-number quantity required')
+        validated.append({'product_id': product_id, 'qty': qty})
+    try:
+        result = services.create_self_use(g.db, validated)
+    except ServiceError as e:
+        return _service_error(e)
+    return jsonify({'success': True, 'batch_id': result['batch_id'],
+                    'total_value': result['total_value']})
+
+@app.route('/api/self-use/history', methods=['GET'])
+@login_required
+def api_self_use_history():
+    period = request.args.get('period', 'all')
+    tz = _client_tz(request.args.get('tz'))
+    query = """
+        SELECT sb.id, sb.total_value, sb.created_at
+        FROM self_use_batches sb
+        WHERE 1=1
+    """
+    params = ()
+    unit = {'today': 'day', 'week': 'week', 'month': 'month', 'year': 'year'}.get(period)
+    if unit:
+        start, end = get_date_range(unit, 0, tz)
+        clause, params = build_date_filter(start, end, 'sb.created_at')
+        query += clause
+    elif period != 'all':
+        return _err('invalid period')
+    query += " ORDER BY sb.created_at DESC"
+    batches = g.db.execute(query, params).fetchall()
+    result = []
+    for b in batches:
+        items = g.db.execute("""
+            SELECT su.*, p.name as product_name, p.sku as product_sku
+            FROM self_use_items su
+            JOIN products p ON su.product_id = p.id
+            WHERE su.batch_id = ?
+            ORDER BY su.id
+        """, (b['id'],)).fetchall()
+        result.append({
+            'id': b['id'],
+            'total_value': b['total_value'],
+            'created_at': b['created_at'],
+            'items': [dict(i) for i in items]
+        })
+    return jsonify(result)
+
 # --- Settings ---
 def _parse_whitelist(raw):
     """Comma/space separated Telegram user IDs -> list[int]. Raises ValueError
@@ -743,7 +815,7 @@ def api_sales_summary():
         return _service_error(e)
     return jsonify({k: summary[k] for k in (
         'total_revenue', 'total_orders', 'unique_skus',
-        'total_items_sold', 'restock_cost', 'net_profit')})
+        'total_items_sold', 'restock_cost', 'self_use_value', 'net_profit')})
 
 @app.route('/api/sales/product-value', methods=['GET'])
 @login_required

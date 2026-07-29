@@ -439,6 +439,7 @@ function loadSalesSummary() {
             document.getElementById('stat-items').textContent = d.total_items_sold;
             document.getElementById('stat-restock-cost').textContent = formatRupiah(d.restock_cost);
             document.getElementById('stat-net-profit').textContent = formatRupiah(d.net_profit);
+            document.getElementById('stat-self-use').textContent = formatRupiah(d.self_use_value);
         });
     fetchJson('/api/sales/product-value')
         .then(d => {
@@ -556,9 +557,17 @@ document.addEventListener('click', e => {
         timeOffset = 0;
         loadSalesData();
     } else if (e.target.classList.contains('btn-period')) {
-        document.querySelectorAll('.btn-period').forEach(b => b.classList.remove('active'));
+        // Dispatch on the selector's data-history so several history tables can
+        // coexist; the active reset is scoped to the clicked group so two
+        // selectors on one page would not clear each other.
+        const group = e.target.closest('.period-selector');
+        (group || document).querySelectorAll('.btn-period').forEach(b => b.classList.remove('active'));
         e.target.classList.add('active');
-        if (document.getElementById('restockHistoryBody')) {
+        const which = group && group.dataset.history;
+        if (which === 'selfuse') {
+            selfUsePeriod = e.target.dataset.period;
+            loadSelfUseHistory();
+        } else if (which === 'restock') {
             restockPeriod = e.target.dataset.period;
             loadRestockHistory();
         }
@@ -566,6 +575,8 @@ document.addEventListener('click', e => {
 });
 
 /* ===== Restock ===== */
+let restockPeriod = 'all';
+
 function addRestockItem() {
     const idx = document.getElementById('restockItems').children.length;
     const div = document.createElement('div');
@@ -639,6 +650,91 @@ function loadRestockHistory() {
         });
 }
 
+/* ===== Self Use ===== */
+let selfUsePeriod = 'all';
+
+function addSelfUseItem() {
+    const idx = document.getElementById('selfUseItems').children.length;
+    const div = document.createElement('div');
+    div.className = 'self-use-item-row';
+    div.innerHTML = `
+        <div class="form-group">
+            <select id="selfuse-product-${idx}" onchange="calcSelfUseTotal()">
+                <option value="">${t('Select product')}</option>
+                ${PRODUCTS.map(p => `<option value="${p.id}">${escapeHtml(p.name)} (${escapeHtml(p.sku || '-')}) - ${t('Stock: {n}', { n: p.stock })}</option>`).join('')}
+            </select>
+        </div>
+        <div class="form-group">
+            <input type="number" id="selfuse-qty-${idx}" min="1" value="1" placeholder="${t('Qty')}" oninput="calcSelfUseTotal()">
+        </div>
+        <div class="form-group">
+            <button class="btn-remove-item" onclick="this.closest('.self-use-item-row').remove(); calcSelfUseTotal();">&times;</button>
+        </div>
+    `;
+    document.getElementById('selfUseItems').appendChild(div);
+}
+
+/* Client-side estimate only — the server re-reads the live price when saving. */
+function calcSelfUseTotal() {
+    let total = 0;
+    document.querySelectorAll('.self-use-item-row').forEach(row => {
+        const pid = parseInt(row.querySelector('select').value);
+        const qty = parseInt(row.querySelector('input').value) || 0;
+        const product = PRODUCTS.find(p => p.id === pid);
+        if (product && qty > 0) total += product.price * qty;
+    });
+    document.getElementById('selfUseTotal').textContent = formatRupiah(total);
+}
+
+function submitSelfUse() {
+    const rows = document.querySelectorAll('.self-use-item-row');
+    const items = [];
+    rows.forEach(row => {
+        const pid = parseInt(row.querySelector('select').value);
+        const qty = parseInt(row.querySelector('input').value) || 0;
+        if (pid && qty > 0) {
+            items.push({ product_id: pid, qty: qty });
+        }
+    });
+    if (!items.length) return showToast(t('Add at least one product'), 'error');
+    api('/api/self-use', 'POST', { items }).then(d => {
+        if (d.success) {
+            showToast(t('Self use saved! Total value: {value}', { value: formatRupiah(d.total_value) }));
+            document.getElementById('selfUseItems').innerHTML = '';
+            addSelfUseItem();
+            calcSelfUseTotal();
+            loadSelfUseHistory();
+        } else showToast(d.error, 'error');
+    });
+}
+
+function loadSelfUseHistory() {
+    fetchJson(`/api/self-use/history?period=${selfUsePeriod}&tz=${encodeURIComponent(CLIENT_TZ)}`)
+        .then(d => {
+            const tbody = document.getElementById('selfUseHistoryBody');
+            if (!d.length) {
+                tbody.innerHTML = `<tr><td colspan="4" class="empty-row">${t('No self use history yet')}</td></tr>`;
+                return;
+            }
+            tbody.innerHTML = d.map(b => {
+                const productList = b.items.map(i => `${escapeHtml(i.product_name)} (${escapeHtml(i.product_sku || '-')}): -${i.quantity}`).join('<br>');
+                return `
+                    <tr class="self-use-batch-row" onclick="const d = this.nextElementSibling; d.style.display = d.style.display === 'none' ? '' : 'none'">
+                        <td>${t('Batch #{id}', { id: b.id })}</td>
+                        <td>${t('{n} products', { n: b.items.length })}</td>
+                        <td>${formatRupiah(b.total_value)}</td>
+                        <td>${formatLocalDate(b.created_at)}</td>
+                    </tr>
+                    <tr class="self-use-detail-row" style="display:none">
+                        <td colspan="4" style="background:#f8f9ff;padding:12px 16px;font-size:13px;color:#555">
+                            ${productList}
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        });
+}
+
 /* ===== Init ===== */
 document.addEventListener('DOMContentLoaded', () => {
     if (document.getElementById('productsBody')) loadProducts();
@@ -647,5 +743,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (document.getElementById('restockItems')) {
         addRestockItem();
         loadRestockHistory();
+    }
+    if (document.getElementById('selfUseItems')) {
+        addSelfUseItem();
+        calcSelfUseTotal();
+        loadSelfUseHistory();
     }
 });

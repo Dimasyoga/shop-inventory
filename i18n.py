@@ -29,6 +29,7 @@ TRANSLATIONS = {
         'Categories': 'Kategori',
         'Orders': 'Pesanan',
         'Restock': 'Restok',
+        'Self Use': 'Pemakaian Sendiri',
         'Sales': 'Penjualan',
         'Settings': 'Pengaturan',
         'Logout': 'Keluar',
@@ -83,6 +84,7 @@ TRANSLATIONS = {
         'Net Profit ({month})': 'Laba Bersih ({month})',
         'Total Product Sale Value': 'Total Nilai Jual Produk',
         'Restock Cost ({month})': 'Biaya Restok ({month})',
+        'Self Use ({month})': 'Pemakaian Sendiri ({month})',
         'Recent Orders': 'Pesanan Terbaru',
         'No orders yet': 'Belum ada pesanan',
         'Low Stock Alerts': 'Peringatan Stok Menipis',
@@ -162,6 +164,15 @@ TRANSLATIONS = {
         'Batch #{id}': 'Batch #{id}',
         '{n} products': '{n} produk',
 
+        # --- Self use ---
+        'New Self Use': 'Pemakaian Sendiri Baru',
+        'Submit Self Use': 'Kirim Pemakaian Sendiri',
+        'Self Use History': 'Riwayat Pemakaian Sendiri',
+        'No self use history yet': 'Belum ada riwayat pemakaian sendiri',
+        'Total Value': 'Total Nilai',
+        'Self use saved! Total value: {value}':
+            'Pemakaian sendiri tersimpan! Total nilai: {value}',
+
         # --- Sales dashboard ---
         'Sales Dashboard': 'Dasbor Penjualan',
         'Day': 'Hari',
@@ -222,6 +233,7 @@ TRANSLATIONS = {
         '🛒 Orders': '🛒 Pesanan',
         '🆕 New order': '🆕 Pesanan baru',
         '📥 Restock': '📥 Restok',
+        '🏠 Self use': '🏠 Pemakaian sendiri',
         '📈 Sales summary': '📈 Ringkasan penjualan',
         '« Menu': '« Menu',
         '« Orders': '« Pesanan',
@@ -252,10 +264,12 @@ TRANSLATIONS = {
         'Revenue: {amount}': 'Pendapatan: {amount}',
         'Orders: {orders}   Items sold: {items}': 'Pesanan: {orders}   Item terjual: {items}',
         'Restock cost: {amount}': 'Biaya restok: {amount}',
+        'Self use: {amount}': 'Pemakaian sendiri: {amount}',
         'Net profit: {amount}': 'Laba bersih: {amount}',
         'Week of {date}': 'Minggu tanggal {date}',
         '🆕 New order — review': '🆕 Pesanan baru — tinjau',
         '📥 Restock — review': '📥 Restok — tinjau',
+        '🏠 Self use — review': '🏠 Pemakaian sendiri — tinjau',
         'Selected:': 'Dipilih:',
         'Pick a product:': 'Pilih produk:',
         '✔ Done': '✔ Selesai',
@@ -269,6 +283,7 @@ TRANSLATIONS = {
         'Total cost: <b>{cost}</b>': 'Total biaya: <b>{cost}</b>',
         '✅ Create draft order': '✅ Buat pesanan draf',
         '✅ Save restock': '✅ Simpan restok',
+        '✅ Save self use': '✅ Simpan pemakaian sendiri',
         'View order': 'Lihat pesanan',
         'Total: {amount}': 'Total: {amount}',
         # stale-order alerts (pushed by the bot poller)
@@ -296,10 +311,13 @@ TRANSLATIONS = {
         'Send the total cost first': 'Kirim total biaya terlebih dahulu',
         'Order created': 'Pesanan dibuat',
         'Restock saved': 'Restok tersimpan',
+        'Self use saved': 'Pemakaian sendiri tersimpan',
         '✅ Draft order <b>#{id}</b> created — total {total}':
             '✅ Pesanan draf <b>#{id}</b> dibuat — total {total}',
         '✅ Restock batch <b>#{id}</b> saved — {cost}':
             '✅ Batch restok <b>#{id}</b> tersimpan — {cost}',
+        '✅ Self use <b>#{id}</b> saved — {total}':
+            '✅ Pemakaian sendiri <b>#{id}</b> tersimpan — {total}',
 
         # --- Service / business-rule errors (services.py) ---
         'Order not found': 'Pesanan tidak ditemukan',

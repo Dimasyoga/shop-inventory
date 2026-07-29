@@ -224,6 +224,59 @@ def create_restock(db, items, total_cost):
     return batch_id
 
 
+# --- Self use ---
+
+def create_self_use(db, items):
+    """items = [{'product_id': int, 'qty': int}] (shape pre-validated by caller).
+
+    Stock the seller took for themself: decrements stock and values each line at
+    the product's current retail price, exactly like an order line. It produces
+    no revenue and no cost -- the money was already booked as restock spend --
+    so it is reported as its own metric and never enters net_profit.
+
+    Returns {'batch_id', 'total_value'}.
+    """
+    # Sum per product first: a submission may list the same product twice (the
+    # web form does not dedupe), and checking each line against the full stock
+    # would let such a batch pass this named check only to fail below on the
+    # guarded UPDATE with the less helpful id-only message.
+    needed = {}
+    for item in items:
+        needed[item['product_id']] = needed.get(item['product_id'], 0) + item['qty']
+
+    total_value = 0
+    rows = []
+    for item in items:
+        product = db.execute("SELECT * FROM products WHERE id = ?", (item['product_id'],)).fetchone()
+        if not product:
+            raise NotFoundError('Product {id} not found', id=item['product_id'])
+        if product['stock_qty'] < needed[item['product_id']]:
+            raise ServiceError('Insufficient stock for {name}', name=product['name'])
+        subtotal = product['price'] * item['qty']
+        total_value += subtotal
+        rows.append((item['product_id'], item['qty'], product['price'], subtotal))
+
+    cur = db.execute("INSERT INTO self_use_batches (total_value) VALUES (?)", (total_value,))
+    batch_id = cur.lastrowid
+    for product_id, qty, price, subtotal in rows:
+        # Conditional decrement is atomic: no read-modify-write window for
+        # concurrent requests to double-count against (see complete_order).
+        cur = db.execute(
+            "UPDATE products SET stock_qty = stock_qty - ?, updated_at = CURRENT_TIMESTAMP"
+            " WHERE id = ? AND stock_qty >= ?",
+            (qty, product_id, qty))
+        if cur.rowcount == 0:
+            db.rollback()
+            raise ServiceError('Insufficient stock for product #{id}', id=product_id)
+        db.execute("INSERT INTO self_use_items (batch_id, product_id, quantity, unit_price, subtotal)"
+                   " VALUES (?, ?, ?, ?, ?)",
+                   (batch_id, product_id, qty, price, subtotal))
+        db.execute("INSERT INTO stock_logs (product_id, change_qty, reason) VALUES (?, ?, ?)",
+                   (product_id, -qty, f'self use batch #{batch_id}'))
+    db.commit()
+    return {'batch_id': batch_id, 'total_value': total_value}
+
+
 # --- Sales summary ---
 
 def sales_summary(db, unit, offset, tz):
@@ -250,10 +303,15 @@ def sales_summary(db, unit, offset, tz):
         WHERE o.status = 'completed'
     """ + date_filter, params).fetchone()
 
-    restock_filter, restock_params = build_date_filter(start, end, 'created_at')
+    # Both batch tables date-filter on a bare `created_at`, so build the fragment once.
+    batch_filter, batch_params = build_date_filter(start, end, 'created_at')
     restock_cost = db.execute(
-        "SELECT COALESCE(SUM(total_cost), 0) as total FROM restock_batches WHERE 1=1" + restock_filter,
-        restock_params
+        "SELECT COALESCE(SUM(total_cost), 0) as total FROM restock_batches WHERE 1=1" + batch_filter,
+        batch_params
+    ).fetchone()['total']
+    self_use_value = db.execute(
+        "SELECT COALESCE(SUM(total_value), 0) as total FROM self_use_batches WHERE 1=1" + batch_filter,
+        batch_params
     ).fetchone()['total']
 
     return {
@@ -262,6 +320,10 @@ def sales_summary(db, unit, offset, tz):
         'unique_skus': items['unique_skus'],
         'total_items_sold': items['total_items_sold'],
         'restock_cost': restock_cost,
+        'self_use_value': self_use_value,
+        # Self use sits alongside profit, never inside it: the goods were already
+        # paid for as restock spend, so deducting their retail value here would
+        # double-count. Keep this expression as-is.
         'net_profit': row['total_revenue'] - restock_cost,
         'start': start,
         'end': end,

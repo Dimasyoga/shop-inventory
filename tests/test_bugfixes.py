@@ -120,6 +120,90 @@ def test_restock_increments_stock_and_logs(client, product):
     assert logs[0][1].startswith("restock batch #")
 
 
+def self_use_batch_count():
+    rows, _ = run_sql("SELECT COUNT(*) AS cnt FROM self_use_batches")
+    return rows[0]["cnt"]
+
+
+def test_self_use_decrements_stock_and_logs(client, product):
+    pid = product(stock=10, price=5000)
+    res = client.post("/api/self-use", json={"items": [{"product_id": pid, "qty": 4}]})
+    assert res.status_code == 200
+    body = res.get_json()
+    assert body["total_value"] == 20000
+    assert stock_of(pid) == 6
+    assert stock_logs_for(pid) == [(-4, f"self use batch #{body['batch_id']}")]
+
+
+def test_self_use_snapshots_the_price_at_entry_time(client, product):
+    """Later price edits must not move historical self-use value."""
+    pid = product(stock=10, price=5000)
+    client.post("/api/self-use", json={"items": [{"product_id": pid, "qty": 2}]})
+    run_sql("UPDATE products SET price = 9000 WHERE id = ?", (pid,))
+    rows, _ = run_sql("SELECT unit_price, subtotal FROM self_use_items")
+    assert rows[0]["unit_price"] == 5000
+    assert rows[0]["subtotal"] == 10000
+    batches, _ = run_sql("SELECT total_value FROM self_use_batches")
+    assert batches[0]["total_value"] == 10000
+
+
+def test_self_use_partial_failure_rolls_back_everything(client, product):
+    """Item 1 in stock, item 2 not: no stock change, no log, no batch row."""
+    p_ok = product(stock=10, name="InStock")
+    p_short = product(stock=1, name="Short")
+    res = client.post("/api/self-use", json={"items": [
+        {"product_id": p_ok, "qty": 5}, {"product_id": p_short, "qty": 3}]})
+    assert res.status_code == 400
+    assert stock_of(p_ok) == 10
+    assert stock_of(p_short) == 1
+    assert stock_logs_for(p_ok) == []
+    assert self_use_batch_count() == 0
+
+
+def test_self_use_duplicate_lines_are_checked_against_combined_stock(client, product):
+    """Two lines for one product must not each pass a full-stock check."""
+    pid = product(stock=5)
+    res = client.post("/api/self-use", json={"items": [
+        {"product_id": pid, "qty": 3}, {"product_id": pid, "qty": 3}]})
+    assert res.status_code == 400
+    assert stock_of(pid) == 5
+    assert self_use_batch_count() == 0
+
+
+def test_self_use_allows_duplicate_lines_that_fit(client, product):
+    pid = product(stock=5)
+    res = client.post("/api/self-use", json={"items": [
+        {"product_id": pid, "qty": 2}, {"product_id": pid, "qty": 3}]})
+    assert res.status_code == 200
+    assert stock_of(pid) == 0
+    items, _ = run_sql("SELECT quantity FROM self_use_items ORDER BY id")
+    assert [r["quantity"] for r in items] == [2, 3]  # not deduped, like orders/restocks
+
+
+@pytest.mark.parametrize("qty", [-5, 0, "abc", None, True])
+def test_self_use_rejects_bad_quantity(client, product, qty):
+    pid = product(stock=10)
+    item = {"product_id": pid, "qty": qty}
+    if qty is None:
+        del item["qty"]
+    res = client.post("/api/self-use", json={"items": [item]})
+    assert res.status_code == 400
+    assert stock_of(pid) == 10
+    assert self_use_batch_count() == 0
+
+
+@pytest.mark.parametrize("payload", [{"items": []}, {}, {"items": "nope"}, {"items": ["x"]}])
+def test_self_use_rejects_bad_item_list(client, payload):
+    assert client.post("/api/self-use", json=payload).status_code == 400
+    assert self_use_batch_count() == 0
+
+
+def test_self_use_unknown_product_returns_404(client):
+    res = client.post("/api/self-use", json={"items": [{"product_id": 9999, "qty": 1}]})
+    assert res.status_code == 404
+    assert self_use_batch_count() == 0
+
+
 def test_adjust_below_zero_rejected_and_unchanged(client, product):
     pid = product(stock=3)
     res = client.post("/api/stock/adjust", json={"product_id": pid, "change_qty": -5, "reason": "shrinkage"})
@@ -170,6 +254,7 @@ def test_valid_order_still_works(client, product):
     ("/api/products", "post"),
     ("/api/orders", "post"),
     ("/api/restock", "post"),
+    ("/api/self-use", "post"),
     ("/api/categories", "post"),
     ("/api/stock/adjust", "post"),
 ])
@@ -264,7 +349,7 @@ XSS_NAME = "</script><img src=x onerror=alert(1)>"
 def test_product_pages_do_not_embed_raw_script(client, product):
     """Regression: templates built JS literals from raw names inside <script>."""
     product(name=XSS_NAME, sku="XSS1", stock=5)
-    for path in ("/orders", "/restock"):
+    for path in ("/orders", "/restock", "/self-use"):
         html = client.get(path).get_data(as_text=True)
         assert "</script><img" not in html, f"{path} embeds the raw payload"
         assert "\\u003c" in html  # tojson escaped it

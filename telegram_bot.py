@@ -174,6 +174,10 @@ STATUS_CODES = {'d': 'draft', 'c': 'confirmed', 'f': 'completed', 'x': 'cancelle
 STATUS_LABELS = {'draft': '📝 Draft', 'confirmed': '💳 Payment Confirmed',
                  'completed': '✅ Completed', 'cancelled': '❌ Cancelled'}
 QTY_CHOICES = (1, 2, 3, 5, 10, 20)
+# Callback-data prefix <-> stateful flow. Dispatch compares whole parts[0]
+# tokens, so these never collide with the single-letter screen prefixes.
+FLOW_PREFIXES = {'no': 'order', 'r': 'restock', 'su': 'selfuse'}
+FLOW_PREFIX = {v: k for k, v in FLOW_PREFIXES.items()}
 UNIT_CODES = {'d': 'day', 'w': 'week', 'm': 'month', 'y': 'year'}
 UNIT_LABELS = {'d': 'Day', 'w': 'Week', 'm': 'Month', 'y': 'Year'}
 
@@ -183,7 +187,7 @@ def screen_main(t):
     return text, kb(
         [btn(t('📦 Products'), 'p:0'), btn(t('🛒 Orders'), 'o')],
         [btn(t('🆕 New order'), 'no'), btn(t('📥 Restock'), 'r')],
-        [btn(t('📈 Sales summary'), 's:d:0')])
+        [btn(t('📈 Sales summary'), 's:d:0'), btn(t('🏠 Self use'), 'su')])
 
 
 def screen_products(db, page, t):
@@ -278,6 +282,7 @@ def screen_summary(db, unit_code, offset, tz, t):
         t('Revenue: {amount}', amount=format_rupiah(s['total_revenue'])),
         t('Orders: {orders}   Items sold: {items}', orders=s['total_orders'], items=s['total_items_sold']),
         t('Restock cost: {amount}', amount=format_rupiah(s['restock_cost'])),
+        t('Self use: {amount}', amount=format_rupiah(s['self_use_value'])),
         f"<b>{t('Net profit: {amount}', amount=format_rupiah(s['net_profit']))}</b>",
     ])
     unit_row = [btn(('· ' if c == unit_code else '') + t(UNIT_LABELS[c]), f's:{c}:0')
@@ -301,8 +306,9 @@ def _cart_lines(db, items):
 
 
 def screen_flow_picker(db, flow, items, page, t):
-    prefix = 'no' if flow == 'order' else 'r'
-    title = t('🆕 New order') if flow == 'order' else t('📥 Restock')
+    prefix = FLOW_PREFIX[flow]
+    title = {'order': t('🆕 New order'), 'restock': t('📥 Restock'),
+             'selfuse': t('🏠 Self use')}[flow]
     rows, has_more = services.list_products(db, page=page, page_size=8)
     lines = [f'<b>{title}</b>']
     if items:
@@ -310,7 +316,9 @@ def screen_flow_picker(db, flow, items, page, t):
     lines.append(t('Pick a product:'))
     buttons = []
     for p in rows:
-        stock = f" ({p['stock_qty']})" if flow == 'order' else ''
+        # Restock adds stock, so the current level is noise there; the flows that
+        # take stock out need it visible.
+        stock = f" ({p['stock_qty']})" if flow != 'restock' else ''
         buttons.append([btn(f"{p['name'][:28]}{stock}", f'{prefix}:i:{p["id"]}')])
     nav = []
     if page > 0:
@@ -326,11 +334,11 @@ def screen_flow_picker(db, flow, items, page, t):
 
 
 def screen_flow_qty(db, flow, pid, t):
-    prefix = 'no' if flow == 'order' else 'r'
+    prefix = FLOW_PREFIX[flow]
     p = db.execute("SELECT * FROM products WHERE id = ?", (pid,)).fetchone()
     name = esc(p['name']) if p else f'#{pid}'
     text = t('How many <b>{name}</b>?', name=name)
-    if flow == 'order' and p:
+    if flow != 'restock' and p:
         text += t(' (stock: {n})', n=p['stock_qty'])
     text += '\n' + t('Tap a number, or ✏️ Custom to type any amount.')
     qty_row = [btn(str(n), f'{prefix}:q:{n}') for n in QTY_CHOICES]
@@ -339,22 +347,27 @@ def screen_flow_qty(db, flow, pid, t):
 
 
 def screen_flow_review(db, flow, state, t):
-    prefix = 'no' if flow == 'order' else 'r'
-    title = t('🆕 New order — review') if flow == 'order' else t('📥 Restock — review')
-    lines = [f'<b>{title}</b>'] + _cart_lines(db, state['items'])
-    if flow == 'order':
+    prefix = FLOW_PREFIX[flow]
+    if flow == 'restock':
+        title = t('📥 Restock — review')
+        lines = [f'<b>{title}</b>'] + _cart_lines(db, state['items'])
+        cost = state.get('cost')
+        cost_str = format_rupiah(cost) if cost is not None else '—'
+        lines.append(t('Total cost: <b>{cost}</b>', cost=cost_str))
+        action = btn(t('✅ Save restock'), 'r:!')
+    else:
+        # Order and self use both value the cart at the current retail price;
+        # only the wording and the commit button differ.
+        title = t('🆕 New order — review') if flow == 'order' else t('🏠 Self use — review')
+        lines = [f'<b>{title}</b>'] + _cart_lines(db, state['items'])
         total = 0
         for pid, qty in state['items'].items():
             p = db.execute("SELECT price FROM products WHERE id = ?", (pid,)).fetchone()
             if p:
                 total += p['price'] * qty
         lines.append(f"<b>{t('Total: {amount}', amount=format_rupiah(total))}</b>")
-        action = btn(t('✅ Create draft order'), 'no:!')
-    else:
-        cost = state.get('cost')
-        cost_str = format_rupiah(cost) if cost is not None else '—'
-        lines.append(t('Total cost: <b>{cost}</b>', cost=cost_str))
-        action = btn(t('✅ Save restock'), 'r:!')
+        action = (btn(t('✅ Create draft order'), 'no:!') if flow == 'order'
+                  else btn(t('✅ Save self use'), 'su:!'))
     return '\n'.join(lines), kb([action],
                                 [btn(t('+ Add more'), f'{prefix}:p:0'), btn(t('✖ Abandon'), f'{prefix}:c')])
 
@@ -491,7 +504,7 @@ def _handle_callback(api, db, callback, tz, states, t):
         elif parts[0] == 's':
             offset = max(0, int(parts[2]))
             show(*screen_summary(db, parts[1], offset, tz, t))
-        elif parts[0] in ('no', 'r'):
+        elif parts[0] in FLOW_PREFIXES:
             _handle_flow_callback(api, db, callback, parts, states, show, ack, t)
             return  # flow handler does its own ack
         else:
@@ -505,11 +518,11 @@ def _handle_callback(api, db, callback, tz, states, t):
 def _handle_flow_callback(api, db, callback, parts, states, show, ack, t):
     chat_id = ((callback.get('message') or {}).get('chat') or {}).get('id')
     prefix = parts[0]
-    flow = 'order' if prefix == 'no' else 'restock'
+    flow = FLOW_PREFIXES[prefix]
     sub = parts[1] if len(parts) > 1 else None
     state = states.get(chat_id)
 
-    if sub is None:  # flow entry: 'no' or 'r'
+    if sub is None:  # flow entry: 'no', 'r' or 'su'
         state = {'flow': flow, 'items': {}, 'pending_pid': None, 'await_qty': False}
         if flow == 'restock':
             state.update(await_cost=False, cost=None)
@@ -563,8 +576,8 @@ def _handle_flow_callback(api, db, callback, parts, states, show, ack, t):
             if not state['items']:
                 ack(t('Nothing selected yet'), alert=True)
                 return
-            if flow == 'order':
-                show(*screen_flow_review(db, 'order', state, t))
+            if flow != 'restock':
+                show(*screen_flow_review(db, flow, state, t))
                 ack()
             else:
                 states.set(chat_id, dict(state, await_cost=True))
@@ -579,6 +592,14 @@ def _handle_flow_callback(api, db, callback, parts, states, show, ack, t):
                        id=result['order_id'], total=format_rupiah(result['total'])),
                      kb([btn(t('View order'), f"od:{result['order_id']}")], [btn(t('« Menu'), 'm')]))
                 ack(t('Order created'))
+            elif flow == 'selfuse':
+                items = [{'product_id': pid, 'qty': qty} for pid, qty in state['items'].items()]
+                result = services.create_self_use(db, items)
+                states.pop(chat_id)
+                show(t('✅ Self use <b>#{id}</b> saved — {total}',
+                       id=result['batch_id'], total=format_rupiah(result['total_value'])),
+                     kb([btn(t('« Menu'), 'm')]))
+                ack(t('Self use saved'))
             else:
                 if state.get('cost') is None:
                     ack(t('Send the total cost first'), alert=True)
