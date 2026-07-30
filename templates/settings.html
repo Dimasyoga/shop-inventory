@@ -56,6 +56,13 @@
             <input type="number" id="tgAlertHours" min="0" step="any" value="{{ order_alert_hours }}" placeholder="24">
             <small class="help-text">{{ t('Alert whitelisted users when a draft or payment-confirmed order stays in that state longer than this. 0 disables.') }}</small>
         </div>
+        <div class="form-group">
+            <label>
+                <input type="checkbox" id="tgMonthlyReport" {% if monthly_report_enabled %}checked{% endif %}>
+                {{ t('Send the monthly report automatically') }}
+            </label>
+            <small class="help-text">{{ t('When a month closes, the audit report PDF for it is saved on the server and sent to every whitelisted ID. You can also send any month by hand from the Sales page.') }}</small>
+        </div>
         <div class="form-actions">
             <button type="button" class="btn" onclick="testTelegramConnection()">{{ t('Test Connection') }}</button>
             <button type="submit" class="btn btn-primary">{{ t('Save') }}</button>

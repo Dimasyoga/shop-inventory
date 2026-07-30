@@ -2,6 +2,7 @@ import pytest
 
 import app as app_module
 import database
+import reports
 
 
 @pytest.fixture
@@ -20,6 +21,9 @@ def db_path(tmp_path, monkeypatch):
     # so clear it in case the developer has one exported.
     monkeypatch.delenv("SHOP_ENCRYPTION_KEY", raising=False)
     monkeypatch.setattr(database, "ENCRYPTION_KEY_PATH", str(tmp_path / "test.key"))
+    # Any test that generates a report writes a PDF; keep those out of the source
+    # tree too, for the same reason as the key above.
+    monkeypatch.setattr(reports, "REPORT_DIR", str(tmp_path / "reports"))
     database.init_db()
     return str(path)
 

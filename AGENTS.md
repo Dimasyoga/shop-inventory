@@ -16,7 +16,8 @@ bilingual (English / Bahasa Indonesia).
 | `app.py` | Flask routes, request validation, session/auth. `bootstrap()` does logging + `init_db()` + `BotPoller`. |
 | `wsgi.py` | Gunicorn entrypoint. Calls `bootstrap()`; importing `app:app` directly would skip it. |
 | `services.py` | Business logic shared by web routes **and** the bot. Each function takes an open sqlite3 connection, owns its transaction, and raises `ServiceError`/`NotFoundError`. |
-| `telegram_bot.py` | Bot API client, screen renderers, stateful order/restock flows, and the `BotPoller` daemon thread. Must **not** import `app.py`. |
+| `reports.py` | Monthly audit report: collects a month's records and renders the PDF (fpdf2). Same connection/no-Flask rules as `services.py`; imports fpdf lazily so importing the module never requires it. |
+| `telegram_bot.py` | Bot API client, screen renderers, stateful order/restock flows, monthly-report delivery, and the `BotPoller` daemon thread. Must **not** import `app.py`. |
 | `database.py` | Schema (`init_db`), idempotent migrations, `get_setting`/`set_setting`, DB connection. |
 | `i18n.py` | `TRANSLATIONS` table (English source string → translation), `make_t(lang)`, calendar names. Shared by templates, `app.js`, and the bot. |
 | `templates/*.html` | Jinja templates; `settings.html` holds Telegram/language/account config. |
@@ -53,6 +54,14 @@ bilingual (English / Bahasa Indonesia).
   `i18n.translate_error`; `str(e)` still yields English for logs.
 - **The bot poller** advances its update offset even when handling an update
   throws, so a poison update never loops.
+- **Recurring bot work** hangs off `_cycle` behind a monotonic-deadline check
+  (`_maybe_check_alerts`, `_maybe_send_report`), each with its own DB connection
+  and a blanket `except Exception: log.exception(...)` so a failing job cannot kill
+  the poller. Anything firing less often than the process restarts needs its
+  progress **persisted** — the monthly report keys off a `last_report_period`
+  settings row, because an in-memory deadline re-fires on every restart. A marker
+  that is absent means "no history", and must plant itself without acting rather
+  than backfilling.
 
 ## Running things
 
@@ -82,4 +91,10 @@ Werkzeug debugger (never on an untrusted network).
 - `/healthz` is unauthenticated and returns untranslated JSON on purpose — it is
   the container healthcheck, and `t(...)` there would trip the i18n coverage test.
 - New runtime assets must be vendored into `static/`, not pulled from a CDN: the
-  shop's network may be offline.
+  shop's network may be offline. That covers the PDF fonts in `static/fonts/` as
+  much as Chart.js — and they must stay Unicode-capable, since product names are
+  user data and a Latin-1 font raises on the first curly quote.
+- **Generated files never go in the source tree.** `reports.REPORT_DIR` follows the
+  `database.DB_PATH` idiom (module-level, env-overridable, read at call time) and
+  points into `/data` in Docker; `tests/conftest.py` redirects it to `tmp_path` so
+  no test can leave a PDF behind.

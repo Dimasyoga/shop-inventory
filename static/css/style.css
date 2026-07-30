@@ -268,3 +268,10 @@ select { padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-siz
 .help-text { font-size: 13px; color: #777; margin-bottom: 12px; }
 .help-text a { color: #4361ee; }
 .form-actions { display: flex; gap: 8px; margin-top: 16px; }
+
+/* Monthly report (sales page) */
+.report-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.report-actions select {
+    padding: 8px 10px; border: 1px solid #ddd; border-radius: 6px;
+    font-size: 14px; min-width: 160px;
+}

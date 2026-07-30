@@ -1,4 +1,5 @@
-"""Telegram bot: browse products, manage orders, create restocks, view sales summary.
+"""Telegram bot: browse products, manage orders, create restocks, view sales
+summary, and deliver the monthly audit report.
 
 Runs as a daemon thread (BotPoller) long-polling api.telegram.org with stdlib
 urllib — no external dependencies, no public URL needed. Only whitelisted
@@ -11,6 +12,7 @@ connections and call services.py directly.
 import html
 import json
 import logging
+import secrets
 import threading
 import time
 import urllib.error
@@ -21,6 +23,7 @@ from collections import namedtuple
 
 import database
 import i18n
+import reports
 import services
 from services import ServiceError, format_rupiah
 
@@ -45,10 +48,17 @@ class TelegramAPI:
         self.timeout = timeout
 
     def call(self, method, **params):
+        return self._request(method, json.dumps(params).encode(), 'application/json')
+
+    def _request(self, method, body, content_type):
+        """POST a prepared body and unwrap Telegram's {ok, result} envelope.
+
+        Split out of `call` so sendDocument can reuse the error handling with a
+        multipart body; `call` itself can only ever send JSON.
+        """
         req = urllib.request.Request(
             f'https://api.telegram.org/bot{self.token}/{method}',
-            data=json.dumps(params).encode(),
-            headers={'Content-Type': 'application/json'})
+            data=body, headers={'Content-Type': content_type})
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as res:
                 payload = json.load(res)
@@ -89,6 +99,32 @@ class TelegramAPI:
                 return None
             raise
 
+    def send_document(self, chat_id, filename, content, caption=None):
+        """Upload a file to a chat.
+
+        sendDocument needs multipart/form-data, which `call`'s JSON body cannot
+        express, so the body is assembled here -- keeping the module's promise of
+        no dependencies beyond the standard library.
+        """
+        fields = {'chat_id': str(chat_id)}
+        if caption:
+            # 1024 is Telegram's caption limit; a longer one rejects the whole upload.
+            fields['caption'] = caption[:1024]
+            fields['parse_mode'] = 'HTML'
+        boundary = '----shopinv' + secrets.token_hex(16)
+        body = bytearray()
+        for name, value in fields.items():
+            body += (f'--{boundary}\r\n'
+                     f'Content-Disposition: form-data; name="{name}"\r\n\r\n'
+                     f'{value}\r\n').encode()
+        body += (f'--{boundary}\r\n'
+                 f'Content-Disposition: form-data; name="document"; filename="{filename}"\r\n'
+                 f'Content-Type: application/pdf\r\n\r\n').encode()
+        body += content
+        body += f'\r\n--{boundary}--\r\n'.encode()
+        return self._request('sendDocument', bytes(body),
+                             f'multipart/form-data; boundary={boundary}')
+
     def answer_callback_query(self, callback_query_id, text=None, show_alert=False):
         params = {'callback_query_id': callback_query_id}
         if text:
@@ -100,7 +136,10 @@ class TelegramAPI:
 
 # --- Config ---
 
-BotConfig = namedtuple('BotConfig', 'enabled token whitelist tz alert_hours')
+BotConfig = namedtuple('BotConfig', 'enabled token whitelist tz alert_hours report_enabled')
+
+# Settings row holding the last month a report was delivered for, as 'YYYY-MM'.
+REPORT_MARKER = 'last_report_period'
 
 
 def parse_whitelist(raw):
@@ -133,7 +172,8 @@ def load_bot_config(db):
         token=get_secret_setting(db, 'telegram_bot_token') or '',
         whitelist=parse_whitelist(get_setting(db, 'telegram_whitelist', '')),
         tz=tz,
-        alert_hours=parse_alert_hours(get_setting(db, 'order_alert_hours', '24')))
+        alert_hours=parse_alert_hours(get_setting(db, 'order_alert_hours', '24')),
+        report_enabled=get_setting(db, 'monthly_report_enabled', '1') == '1')
 
 
 # --- Conversation state (order/restock flows only; everything else is stateless) ---
@@ -187,7 +227,8 @@ def screen_main(t):
     return text, kb(
         [btn(t('📦 Products'), 'p:0'), btn(t('🛒 Orders'), 'o')],
         [btn(t('🆕 New order'), 'no'), btn(t('📥 Restock'), 'r')],
-        [btn(t('📈 Sales summary'), 's:d:0'), btn(t('🏠 Self use'), 'su')])
+        [btn(t('🏠 Self use'), 'su'), btn(t('📈 Sales summary'), 's:d:0')],
+        [btn(t('📄 Monthly report'), 'rp')])
 
 
 def screen_products(db, page, t):
@@ -274,7 +315,7 @@ def screen_summary(db, unit_code, offset, tz, t):
         date = f'{start.day:02d} {i18n.month_name(start.month, lang, abbr=True)} {start.year}'
         label = t('Week of {date}', date=date)
     elif unit == 'month':
-        label = f'{i18n.month_name(start.month, lang)} {start.year}'
+        label = i18n.month_label(start, lang)
     else:
         label = str(start.year)
     text = '\n'.join([
@@ -295,6 +336,35 @@ def screen_summary(db, unit_code, offset, tz, t):
 
 
 # --- Order / restock flow screens (stateful) ---
+
+# Closed months offered in the bot's report picker. Six keeps the keyboard short;
+# older months stay reachable from the web page, which offers a full year.
+REPORT_MONTHS = 6
+
+
+def screen_report_picker(t, tz, now=None):
+    text = '\n'.join([f'<b>📄 {t("Monthly Report")}</b>', t('Pick a month:')])
+    rows = []
+    for offset in range(1, REPORT_MONTHS + 1):
+        start, _ = services.get_date_range('month', offset, tz, now=now)
+        rows.append([btn(i18n.month_label(start, t.lang), f'rp:{offset}')])
+    return text, kb(*rows, [btn(t('« Menu'), 'm')])
+
+
+def report_caption(data, t):
+    """Summary shown alongside the uploaded PDF, so the numbers are visible
+    without opening it. Reuses the sales-summary wording."""
+    s = data['summary']
+    return '\n'.join([
+        f'<b>📄 {t("Monthly Report")} — {esc(data["label"])}</b>',
+        t('Revenue: {amount}', amount=format_rupiah(s['total_revenue'])),
+        t('Orders: {orders}   Items sold: {items}',
+          orders=s['total_orders'], items=s['total_items_sold']),
+        t('Restock cost: {amount}', amount=format_rupiah(s['restock_cost'])),
+        t('Self use: {amount}', amount=format_rupiah(s['self_use_value'])),
+        f"<b>{t('Net profit: {amount}', amount=format_rupiah(s['net_profit']))}</b>",
+    ])
+
 
 def _cart_lines(db, items):
     lines = []
@@ -504,6 +574,11 @@ def _handle_callback(api, db, callback, tz, states, t):
         elif parts[0] == 's':
             offset = max(0, int(parts[2]))
             show(*screen_summary(db, parts[1], offset, tz, t))
+        elif data == 'rp':
+            show(*screen_report_picker(t, tz))
+        elif parts[0] == 'rp':
+            _send_report_on_demand(api, db, chat_id, max(1, int(parts[1])), tz, show, ack, t)
+            return  # acked before the slow work starts
         elif parts[0] in FLOW_PREFIXES:
             _handle_flow_callback(api, db, callback, parts, states, show, ack, t)
             return  # flow handler does its own ack
@@ -513,6 +588,32 @@ def _handle_callback(api, db, callback, tz, states, t):
         ack()
     except ServiceError as e:
         ack(i18n.translate_error(e, t), alert=True)
+
+
+def _send_report_on_demand(api, db, chat_id, offset, tz, show, ack, t):
+    """Build, archive and upload one month's report to the chat that asked for it.
+
+    Acknowledges first: rendering and uploading a PDF takes far longer than the
+    few seconds Telegram gives a callback query before it shows an error.
+    """
+    ack(t('Building the report…'))
+    try:
+        _, content, data = reports.build(db, offset, tz, t.lang)
+    except Exception:
+        log.exception('on-demand report build (offset %s) failed', offset)
+        show(t('Could not build the report.'), kb([btn(t('« Menu'), 'm')]))
+        return
+    try:
+        api.send_document(chat_id, reports.report_filename(data['period']),
+                          content, report_caption(data, t))
+    except (TelegramError, OSError) as e:
+        log.warning('on-demand report %s to %s failed: %s', data['period'], chat_id, e)
+        # The archive write already succeeded, so say so rather than implying total failure.
+        show(t('Could not send the report, but it was saved on the server.'),
+             kb([btn(t('« Menu'), 'm')]))
+        return
+    show(t('📄 Report for {month} sent.', month=esc(data['label'])),
+         kb([btn(t('« Menu'), 'm')]))
 
 
 def _handle_flow_callback(api, db, callback, parts, states, show, ack, t):
@@ -657,12 +758,92 @@ def send_stale_order_alerts(api, db, cfg, t):
             services.mark_order_alerted(db, order['id'], order['status'])
 
 
+# --- Monthly report ---
+
+def _month_seq(period):
+    """'2026-06' -> a monotonic month number, so month arithmetic is just ints."""
+    year, month = (int(x) for x in period.split('-'))
+    return year * 12 + (month - 1)
+
+
+def _pending_report_periods(last, target, limit=12):
+    """Closed months after `last` up to and including `target`, oldest first.
+
+    Oldest first and capped: a shop that was offline across several month
+    boundaries catches up in order over successive checks, rather than uploading a
+    year of PDFs in one cycle or silently skipping the months it missed.
+    """
+    try:
+        first, end = _month_seq(last) + 1, _month_seq(target)
+    except (ValueError, AttributeError):
+        log.warning('unreadable %s value %r; reporting the latest closed month only',
+                    REPORT_MARKER, last)
+        return [target]
+    if first > end:
+        return []
+    return [f'{s // 12:04d}-{s % 12 + 1:02d}'
+            for s in range(first, min(end, first + limit - 1) + 1)]
+
+
+def send_monthly_report(api, db, cfg, t, now=None):
+    """Archive and push the report for every closed month not yet reported.
+
+    Progress is a settings row, not in-memory state: a monthly job tracking its
+    deadline in monotonic time would re-fire on every restart. On a database with
+    no marker yet the marker is planted without sending anything, so installing
+    the app (or upgrading to this feature) never blasts out a report for a month
+    the shop was not yet recording.
+
+    Returns the list of periods delivered, for logging and tests.
+    """
+    if not cfg.report_enabled:
+        return []
+    from database import get_setting, set_setting
+    start, _ = services.get_date_range('month', 1, cfg.tz, now=now)
+    target = reports.period_key(start)
+    last = get_setting(db, REPORT_MARKER)
+    if last is None:
+        set_setting(db, REPORT_MARKER, target)
+        db.commit()
+        log.info('%s initialised at %s; reporting starts with the next closed month',
+                 REPORT_MARKER, target)
+        return []
+
+    sent = []
+    for period in _pending_report_periods(last, target):
+        offset = reports.month_offset(period, cfg.tz, now=now)
+        if offset is None:
+            continue
+        path, content, data = reports.build(db, offset, cfg.tz, t.lang, now=now)
+        caption = report_caption(data, t)
+        filename = reports.report_filename(period)
+        delivered = False
+        for chat_id in cfg.whitelist:
+            try:
+                api.send_document(chat_id, filename, content, caption)
+                delivered = True
+            except (TelegramError, OSError) as e:
+                log.warning('monthly report %s to %s failed: %s', period, chat_id, e)
+        # Advance only once someone has it, so a Telegram outage retries next check.
+        # With an empty whitelist there is nobody to deliver to and the archived
+        # file is the whole deliverable, so that counts as done.
+        if not delivered and cfg.whitelist:
+            log.warning('monthly report %s reached nobody; will retry', period)
+            break  # stop here so the backlog stays in order
+        set_setting(db, REPORT_MARKER, period)
+        db.commit()
+        sent.append(period)
+        log.info('monthly report %s delivered to %d chat(s), archived at %s',
+                 period, len(cfg.whitelist), path)
+    return sent
+
+
 # --- Poller ---
 
 class BotPoller(threading.Thread):
     def __init__(self, db_factory=database.get_db, api_factory=TelegramAPI,
                  poll_timeout=25, sleep=time.sleep, clock=time.monotonic,
-                 alert_interval=300):
+                 alert_interval=300, report_interval=3600):
         super().__init__(daemon=True, name='telegram-bot')
         self.db_factory = db_factory
         self.api_factory = api_factory
@@ -670,11 +851,13 @@ class BotPoller(threading.Thread):
         self.sleep = sleep
         self.clock = clock
         self.alert_interval = alert_interval
+        self.report_interval = report_interval
         self.states = ChatStates()
         self._token = None
         self._api = None
         self._offset = None
         self._next_alert_check = 0
+        self._next_report_check = 0
 
     def _maybe_check_alerts(self, cfg):
         """Run the stale-order scan at most once per `alert_interval` seconds."""
@@ -689,6 +872,27 @@ class BotPoller(threading.Thread):
             send_stale_order_alerts(self._api, db, cfg, t)
         except Exception:
             log.exception('stale-order alert check failed')
+        finally:
+            db.close()
+
+    def _maybe_send_report(self, cfg):
+        """Look for an unreported closed month at most once per `report_interval`.
+
+        The interval only throttles a cheap settings lookup; the guard against
+        sending twice is the persisted marker, which survives the restart that
+        resets this in-memory deadline.
+        """
+        now = self.clock()
+        if now < self._next_report_check:
+            return
+        self._next_report_check = now + self.report_interval
+        db = self.db_factory()
+        try:
+            from database import get_setting
+            t = i18n.make_t(i18n.normalize_lang(get_setting(db, 'language', i18n.DEFAULT_LANG)))
+            send_monthly_report(self._api, db, cfg, t)
+        except Exception:
+            log.exception('monthly report check failed')
         finally:
             db.close()
 
@@ -707,6 +911,7 @@ class BotPoller(threading.Thread):
             self._api = self.api_factory(cfg.token)
             self._offset = None
         self._maybe_check_alerts(cfg)
+        self._maybe_send_report(cfg)
         updates = self._api.get_updates(offset=self._offset, timeout=self.poll_timeout)
         for u in updates:
             # advance even if handling fails: never re-loop a poison update

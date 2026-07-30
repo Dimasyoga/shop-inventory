@@ -114,6 +114,16 @@
     </div>
 </div>
 
+<div class="card">
+    <h3>{{ t('Monthly Report') }}</h3>
+    <p class="help-text">{{ t('A PDF with the month summary plus every sale, restock and self-use record, for audit. Saved on the server and sendable to your whitelisted Telegram IDs.') }}</p>
+    <div class="report-actions">
+        <select id="reportMonth"></select>
+        <button class="btn btn-secondary" onclick="downloadReport()">{{ t('Download PDF') }}</button>
+        <button class="btn btn-primary" id="reportSendBtn" onclick="sendReport()">{{ t('Send to Telegram') }}</button>
+    </div>
+</div>
+
 {# Vendored (Chart.js 4.4.7) so the charts still render on a shop network with
    no internet. Update by re-downloading into static/js/vendor/. #}
 <script src="{{ url_for('static', filename='js/vendor/chart.umd.min.js') }}"></script>

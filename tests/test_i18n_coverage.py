@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 # Files that call a translator: t('...') in Python/Jinja/JS, plus _err('...') in app.py.
 SOURCES = [
-    'app.py', 'telegram_bot.py', 'services.py',
+    'app.py', 'telegram_bot.py', 'services.py', 'reports.py',
     'static/js/app.js',
     *(str(p.relative_to(ROOT)) for p in sorted((ROOT / 'templates').glob('*.html'))),
 ]

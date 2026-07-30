@@ -9,3 +9,9 @@ gunicorn==26.0.0
 tzdata==2026.3
 # Fernet, for encrypting the Telegram bot token at rest (see database.py).
 cryptography==49.0.0
+# Monthly audit report rendering (reports.py). Pure Python, so it installs into
+# python:*-slim with no system libraries -- unlike WeasyPrint, which would drag in
+# Pango and Cairo. Its built-in fonts are Latin-1 only, hence the vendored TTFs in
+# static/fonts/: a product name with a curly quote or an emoji must not break the
+# report, and the shop may have no network to fetch a font from.
+fpdf2==2.8.7

@@ -21,7 +21,8 @@ USER appuser
 
 ENV SHOP_DB_PATH=/data/shop.db \
     SHOP_SECRET_KEY_PATH=/data/.secret_key \
-    SHOP_ENCRYPTION_KEY_PATH=/data/.encryption_key
+    SHOP_ENCRYPTION_KEY_PATH=/data/.encryption_key \
+    SHOP_REPORT_DIR=/data/reports
 VOLUME ["/data"]
 
 EXPOSE 5000

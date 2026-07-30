@@ -193,6 +193,43 @@ TRANSLATIONS = {
         'No data yet': 'Belum ada data',
         'Week {n}': 'Minggu {n}',   # sales-trend x-axis label for the month view
 
+        # --- Monthly report (reports.py, plus its web and bot triggers) ---
+        'Monthly Report': 'Laporan Bulanan',
+        'Generated {timestamp}': 'Dibuat {timestamp}',
+        'Sales Performance': 'Kinerja Penjualan',
+        'Metric': 'Metrik',
+        'Value': 'Nilai',
+        'Stock Value (today)': 'Nilai Stok (hari ini)',
+        'Net profit is revenue minus restock cost. Self use is reported separately and never subtracted: those goods were already paid for as restock spend.':
+            'Laba bersih adalah pendapatan dikurangi biaya restok. Pemakaian sendiri dilaporkan terpisah dan tidak pernah dikurangkan: barangnya sudah dibayar sebagai biaya restok.',
+        'Sales Records': 'Catatan Penjualan',
+        'One row per product sold. Only completed orders are included: drafts, confirmed-but-unpaid and cancelled orders never move stock or revenue.':
+            'Satu baris per produk terjual. Hanya pesanan selesai yang disertakan: pesanan draf, terkonfirmasi tapi belum dibayar, dan dibatalkan tidak pernah memengaruhi stok atau pendapatan.',
+        'Restock Records': 'Catatan Restok',
+        'One row per product restocked. Cost is allocated across a batch in proportion to quantity, so a line cost is a share of the batch total, not a supplier price.':
+            'Satu baris per produk direstok. Biaya dialokasikan dalam satu batch sebanding dengan kuantitas, jadi biaya per baris adalah bagian dari total batch, bukan harga pemasok.',
+        'Self Use Records': 'Catatan Pemakaian Sendiri',
+        'One row per product taken by the seller, valued at the retail price at the time of entry. No revenue, and not deducted from net profit.':
+            'Satu baris per produk yang diambil penjual, dinilai pada harga jual saat dicatat. Tidak ada pendapatan, dan tidak dikurangkan dari laba bersih.',
+        'Order': 'Pesanan',
+        'Unit Price': 'Harga Satuan',
+        'Qty Added': 'Jml Ditambah',
+        'Allocated Cost': 'Biaya Dialokasikan',
+        'No records for this month': 'Tidak ada catatan untuk bulan ini',
+        'Orders: {n} — total {amount}': 'Pesanan: {n} — total {amount}',
+        'Batches: {n} — total {amount}': 'Batch: {n} — total {amount}',
+        'A PDF with the month summary plus every sale, restock and self-use record, for audit. Saved on the server and sendable to your whitelisted Telegram IDs.':
+            'PDF berisi ringkasan bulan beserta seluruh catatan penjualan, restok, dan pemakaian sendiri, untuk audit. Tersimpan di server dan dapat dikirim ke ID Telegram yang diizinkan.',
+        'Download PDF': 'Unduh PDF',
+        'Send to Telegram': 'Kirim ke Telegram',
+        'Sending…': 'Mengirim…',
+        'Report for {month} sent to {n} recipient(s)':
+            'Laporan {month} terkirim ke {n} penerima',
+        'Sent to {sent} of {total} recipients.': 'Terkirim ke {sent} dari {total} penerima.',
+        'Send the monthly report automatically': 'Kirim laporan bulanan otomatis',
+        'When a month closes, the audit report PDF for it is saved on the server and sent to every whitelisted ID. You can also send any month by hand from the Sales page.':
+            'Saat sebuah bulan berakhir, PDF laporan auditnya disimpan di server dan dikirim ke semua ID yang diizinkan. Bulan apa pun juga bisa dikirim manual dari halaman Penjualan.',
+
         # --- Settings ---
         'Telegram Bot': 'Bot Telegram',
         'Create a bot with {botfather}, paste its token here, and whitelist your Telegram user ID.':
@@ -235,6 +272,13 @@ TRANSLATIONS = {
         '📥 Restock': '📥 Restok',
         '🏠 Self use': '🏠 Pemakaian sendiri',
         '📈 Sales summary': '📈 Ringkasan penjualan',
+        '📄 Monthly report': '📄 Laporan bulanan',
+        'Pick a month:': 'Pilih bulan:',
+        'Building the report…': 'Menyusun laporan…',
+        'Could not build the report.': 'Laporan tidak dapat dibuat.',
+        'Could not send the report, but it was saved on the server.':
+            'Laporan tidak dapat dikirim, tetapi sudah tersimpan di server.',
+        '📄 Report for {month} sent.': '📄 Laporan {month} terkirim.',
         '« Menu': '« Menu',
         '« Orders': '« Pesanan',
         '« Back': '« Kembali',
@@ -333,6 +377,10 @@ TRANSLATIONS = {
 
         # --- Request validation / API errors (app.py); surfaced as toasts ---
         'Invalid JSON body': 'Isi JSON tidak valid',
+        'No whitelisted Telegram IDs to send to':
+            'Tidak ada ID Telegram yang diizinkan untuk dikirimi',
+        'Could not send to any recipient. The report was saved on the server.':
+            'Tidak dapat mengirim ke penerima mana pun. Laporan tersimpan di server.',
         'Name required': 'Nama wajib diisi',
         'Price must be a number': 'Harga harus berupa angka',
         'Price must be 0 or more': 'Harga harus 0 atau lebih',
@@ -430,6 +478,15 @@ def month_name(month, lang, abbr=False):
 def weekday_abbr(weekday, lang):
     """Localized abbreviated weekday for a 0..6 index (Monday = 0)."""
     return WEEKDAYS_ABBR[normalize_lang(lang)][weekday]
+
+
+def month_label(dt, lang):
+    """'June 2026' / 'Juni 2026' for a date or datetime.
+
+    The dashboard, the bot's monthly summary and the monthly report all title
+    themselves this way; keeping one implementation stops them drifting apart.
+    """
+    return f'{month_name(dt.month, lang)} {dt.year}'
 
 
 def translate_error(err, t):

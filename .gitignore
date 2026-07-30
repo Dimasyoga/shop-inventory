@@ -5,6 +5,7 @@ shop.db-shm
 .encryption_key
 .env
 backups/
+reports/
 *.pyc
 venv/
 __pycache__

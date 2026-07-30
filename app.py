@@ -1,4 +1,5 @@
-from flask import Flask, request, jsonify, render_template, redirect, url_for, session, g
+from flask import (Flask, request, jsonify, render_template, redirect, url_for,
+                   session, g, Response)
 from database import get_db, init_db
 from functools import wraps
 from datetime import datetime, timezone
@@ -10,7 +11,9 @@ import os
 import secrets
 
 import i18n
+import reports
 import services
+import telegram_bot
 from services import (ServiceError, format_rupiah, get_date_range,
                       build_date_filter, _to_utc_str)
 from telegram_bot import TelegramAPI, TelegramError
@@ -183,8 +186,7 @@ def dashboard():
     # Same source as the sales page and the bot, so the three never disagree: the
     # current calendar month in the shop's timezone.
     summary = services.sales_summary(db, 'month', 0, _shop_tz())
-    month_label = '{} {}'.format(
-        i18n.month_name(summary['start'].month, get_lang()), summary['start'].year)
+    month_label = i18n.month_label(summary['start'], get_lang())
     total_product_value = db.execute("""
         SELECT COALESCE(SUM(price * stock_qty), 0) as total FROM products
         WHERE is_archived = 0
@@ -649,6 +651,7 @@ def settings_page():
         whitelist=get_setting(g.db, 'telegram_whitelist', ''),
         shop_timezone=get_setting(g.db, 'shop_timezone', 'Asia/Jakarta'),
         order_alert_hours=get_setting(g.db, 'order_alert_hours', '24'),
+        monthly_report_enabled=get_setting(g.db, 'monthly_report_enabled', '1') == '1',
         current_lang=get_lang(),
         username=session.get('username', ''))
 
@@ -720,6 +723,10 @@ def api_settings_telegram():
         set_setting(g.db, 'shop_timezone', tz_name)
     if alert_hours_val is not None:
         set_setting(g.db, 'order_alert_hours', alert_hours_val)
+    # Absent -> leave unchanged, so a client that predates this field can still save.
+    if 'monthly_report' in data:
+        set_setting(g.db, 'monthly_report_enabled',
+                    '1' if data.get('monthly_report') else '0')
     g.db.commit()
     warning = (i18n.make_t(get_lang())('No users whitelisted — the bot will reject everyone')
                if enabled and not ids else None)
@@ -895,6 +902,93 @@ def api_sales_top_products():
         'top': [{'id': r['id'], 'name': r['name'], 'sku': r['sku'], 'total_sold': r['total_sold'], 'total_revenue': r['total_revenue']} for r in top],
         'bottom': [{'id': r['id'], 'name': r['name'], 'sku': r['sku'], 'total_sold': r['total_sold'], 'total_revenue': r['total_revenue']} for r in bottom]
     })
+
+# --- Monthly report ---
+# Months offered in the picker on the sales page. A year back covers an audit
+# question about any month the shop has been running under this feature.
+REPORT_MONTHS = 12
+
+def _report_offset():
+    """Validated month offset from the request: 1 is the month that just closed.
+
+    Read from the JSON body on POST and the query string on GET, so the download
+    link stays a plain URL the browser can navigate to. Returns
+    (offset, error_response). Offset 0 (the current, incomplete month) is allowed:
+    the page offers it explicitly as a month-to-date figure.
+    """
+    body = _json_body() if request.method == 'POST' else None
+    raw = body.get('offset', 1) if body else request.args.get('offset', 1)
+    try:
+        offset = int(raw)
+    except (TypeError, ValueError):
+        return None, _err('invalid offset')
+    if not (0 <= offset <= REPORT_MONTHS):
+        return None, _err('invalid offset')
+    return offset, None
+
+def _build_report(offset):
+    """Render and archive a month, in the shop's timezone.
+
+    Deliberately not the client's timezone: the archived file and the copy the bot
+    pushes must describe the same month boundaries no matter who asked for it.
+    """
+    return reports.build(g.db, offset, _shop_tz(), get_lang())
+
+@app.route('/api/reports/monthly', methods=['GET'])
+@login_required
+def api_report_download():
+    offset, err = _report_offset()
+    if err:
+        return err
+    _, content, data = _build_report(offset)
+    return Response(content, mimetype='application/pdf', headers={
+        'Content-Disposition':
+            f'attachment; filename="{reports.report_filename(data["period"])}"'})
+
+@app.route('/api/reports/monthly/send', methods=['POST'])
+@login_required
+def api_report_send():
+    from database import get_secret_setting, get_setting
+    offset, err = _report_offset()
+    if err:
+        return err
+    token = get_secret_setting(g.db, 'telegram_bot_token')
+    whitelist = telegram_bot.parse_whitelist(get_setting(g.db, 'telegram_whitelist', ''))
+    if not token:
+        return _err('No bot token saved or provided')
+    if not whitelist:
+        return _err('No whitelisted Telegram IDs to send to')
+    _, content, data = _build_report(offset)
+    api = TelegramAPI(token, timeout=60)  # a PDF upload is slower than a message
+    filename = reports.report_filename(data['period'])
+    caption = telegram_bot.report_caption(data, i18n.make_t(get_lang()))
+    sent, failed = 0, []
+    for chat_id in sorted(whitelist):
+        try:
+            api.send_document(chat_id, filename, content, caption)
+            sent += 1
+        except (TelegramError, OSError) as e:
+            log.warning('report %s to %s failed: %s', data['period'], chat_id, e)
+            failed.append(chat_id)
+    if not sent:
+        return _err('Could not send to any recipient. The report was saved on the server.')
+    result = {'success': True, 'sent': sent, 'month': data['label']}
+    if failed:
+        result['warning'] = i18n.make_t(get_lang())(
+            'Sent to {sent} of {total} recipients.', sent=sent, total=len(whitelist))
+    return jsonify(result)
+
+@app.route('/api/reports/months', methods=['GET'])
+@login_required
+def api_report_months():
+    """Selectable months, newest first, labelled in the shop's language."""
+    tz, lang = _shop_tz(), get_lang()
+    months = []
+    for offset in range(0, REPORT_MONTHS + 1):
+        start, _ = get_date_range('month', offset, tz)
+        months.append({'offset': offset, 'label': i18n.month_label(start, lang),
+                       'period': reports.period_key(start)})
+    return jsonify(months)
 
 def _configure_logging():
     """Attach a timestamped stderr handler. Without this the module loggers fall

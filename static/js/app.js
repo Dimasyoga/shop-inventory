@@ -78,7 +78,8 @@ function saveTelegramSettings(e) {
         token: document.getElementById('tgToken').value,
         whitelist: document.getElementById('tgWhitelist').value,
         timezone: document.getElementById('tgTimezone').value,
-        alert_hours: document.getElementById('tgAlertHours').value
+        alert_hours: document.getElementById('tgAlertHours').value,
+        monthly_report: document.getElementById('tgMonthlyReport').checked
     }).then(d => {
         showToast(d.warning || t('Telegram settings saved'), d.warning ? 'error' : 'success');
         document.getElementById('tgToken').value = '';
@@ -509,6 +510,41 @@ function loadTopProducts() {
         });
 }
 
+/* ===== Monthly Report ===== */
+/* Month labels come from the server rather than toLocaleString: the report is
+   titled in the shop's language and timezone, and the picker must name the same
+   month the generated PDF will cover. */
+function loadReportMonths() {
+    fetchJson('/api/reports/months').then(months => {
+        document.getElementById('reportMonth').innerHTML = months.map(m =>
+            `<option value="${m.offset}"${m.offset === 1 ? ' selected' : ''}>` +
+            `${escapeHtml(m.label)}</option>`).join('');
+    });
+}
+
+function reportOffset() {
+    return document.getElementById('reportMonth').value;
+}
+
+function downloadReport() {
+    /* A plain navigation, not fetch: the response is a PDF attachment, and this
+       lets the browser's own download handling name and save it. */
+    window.location = `/api/reports/monthly?offset=${reportOffset()}`;
+}
+
+function sendReport() {
+    const btn = document.getElementById('reportSendBtn');
+    const label = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = t('Sending…');
+    api('/api/reports/monthly/send', 'POST', { offset: Number(reportOffset()) })
+        .then(d => showToast(d.warning || t('Report for {month} sent to {n} recipient(s)',
+                                            { month: d.month, n: d.sent }),
+                             d.warning ? 'error' : 'success'))
+        .catch(err => showToast(err.message, 'error'))
+        .finally(() => { btn.disabled = false; btn.textContent = label; });
+}
+
 function updateTimeLabel() {
     const now = new Date();
     const labelEl = document.getElementById('timeLabel');
@@ -740,6 +776,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (document.getElementById('productsBody')) loadProducts();
     if (document.getElementById('ordersBody')) loadOrders();
     if (document.getElementById('trendChart')) loadSalesData();
+    if (document.getElementById('reportMonth')) loadReportMonths();
     if (document.getElementById('restockItems')) {
         addRestockItem();
         loadRestockHistory();

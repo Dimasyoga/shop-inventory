@@ -15,3 +15,5 @@ shop.db-shm
 .encryption_key
 .env
 backups/
+# Generated monthly reports; they belong in the volume, not the image.
+reports/

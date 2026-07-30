@@ -279,9 +279,14 @@ def create_self_use(db, items):
 
 # --- Sales summary ---
 
-def sales_summary(db, unit, offset, tz):
-    """Revenue/orders/items/restock-cost/profit for the window. Raises on bad unit."""
-    start, end = get_date_range(unit, offset, tz)
+def sales_summary(db, unit, offset, tz, now=None):
+    """Revenue/orders/items/restock-cost/profit for the window. Raises on bad unit.
+
+    `now` overrides the clock the window is measured back from, so a caller that
+    already fixed a window (the monthly report) gets a summary describing the same
+    period rather than one re-derived from the real time.
+    """
+    start, end = get_date_range(unit, offset, tz, now=now)
     if not start:
         raise ServiceError('invalid unit')
     date_filter, params = build_date_filter(start, end)

@@ -1,6 +1,6 @@
 """Bot handler tests: drive handle_update with synthetic Telegram updates
 against the temp DB, with a FakeAPI recording outgoing calls. No network."""
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -31,6 +31,10 @@ class FakeAPI:
 
     def answer_callback_query(self, cq_id, text=None, show_alert=False):
         return self._record("answerCallbackQuery", id=cq_id, text=text, show_alert=show_alert)
+
+    def send_document(self, chat_id, filename, content, caption=None):
+        return self._record("sendDocument", chat_id=chat_id, filename=filename,
+                            content=content, caption=caption)
 
     # convenience accessors
     def sent(self, method):
@@ -500,3 +504,60 @@ def test_plain_text_resets_to_menu(bot):
     drive(text_update("hello"))
     assert drive.states.get(CHAT) is None
     assert "What do you want to do?" in api.last_text()
+
+
+def test_menu_offers_the_monthly_report(bot):
+    api, drive = bot
+    drive(text_update("/start"))
+    assert "rp" in api.buttons()
+
+
+def test_report_picker_lists_closed_months(bot):
+    import i18n
+    from datetime import datetime, timezone
+    api, drive = bot
+    drive(cb_update("rp"))
+    # Six closed months, each an offset >= 1: the current month is still running
+    # and would make a misleading audit record.
+    assert [b for b in api.buttons() if b.startswith("rp:")] == [
+        f"rp:{n}" for n in range(1, 7)]
+    now = datetime.now(timezone.utc).astimezone(JKT)
+    last_closed = (now.replace(day=1) - timedelta(days=1))
+    assert i18n.month_label(last_closed, "en") in api.buttons_text()
+
+
+def test_report_picker_localized(bot):
+    import i18n
+    from datetime import datetime, timezone
+    api, drive = bot
+    set_language("id")
+    drive(cb_update("rp"))
+    assert "Laporan Bulanan" in api.last_text()
+    last_closed = datetime.now(timezone.utc).astimezone(JKT).replace(day=1) - timedelta(days=1)
+    assert i18n.month_label(last_closed, "id") in api.buttons_text()
+
+
+def test_report_request_uploads_a_pdf_to_the_asking_chat(bot):
+    api, drive = bot
+    make_product()
+    drive(cb_update("rp:1"))
+    uploads = api.sent("sendDocument")
+    assert len(uploads) == 1
+    assert uploads[0]["chat_id"] == CHAT
+    assert uploads[0]["filename"].startswith("shop-report-")
+    assert uploads[0]["content"].startswith(b"%PDF-")
+    # Acked before the slow render, so Telegram doesn't time the callback out.
+    acks = api.sent("answerCallbackQuery")
+    assert acks and acks[0]["text"] == "Building the report…"
+    assert api.calls[0][0] == "answerCallbackQuery"
+
+
+def test_report_request_reports_a_send_failure_without_claiming_total_loss(bot, monkeypatch):
+    api, drive = bot
+
+    def boom(*a, **k):
+        raise telegram_bot.TelegramError("Bad Gateway", 502)
+
+    monkeypatch.setattr(api, "send_document", boom)
+    drive(cb_update("rp:1"))
+    assert "saved on the server" in api.last_text()

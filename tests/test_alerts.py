@@ -27,7 +27,7 @@ def add_order(status="draft", updated_hours_ago=25, total=1000, alerted_status=N
 
 def cfg(alert_hours=24, whitelist=(111, 222)):
     return BotConfig(enabled=True, token="t", whitelist=set(whitelist),
-                     tz=timezone.utc, alert_hours=alert_hours)
+                     tz=timezone.utc, alert_hours=alert_hours, report_enabled=True)
 
 
 class FakeAPI:

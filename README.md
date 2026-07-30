@@ -18,6 +18,7 @@ A Flask-based shop inventory management system built with Python 3.14, SQLite, a
 - Batch-level restock system with cost allocation
 - Self-use tracking for stock the seller takes for themself (no revenue)
 - Sales dashboard with period-based analytics and trend charts
+- Monthly PDF audit report, archived on the server and pushed to Telegram (see below)
 - Stock audit logging on every sale, restock, and self use
 - Low stock alerts and reorder thresholds
 - Telegram bot with button-driven menus and stale-order alerts (see below)
@@ -43,8 +44,8 @@ server locale, so month and weekday names are localized too.
 ### Telegram Bot
 
 Manage the shop from Telegram: browse products, walk through creating orders,
-restocks and self-use entries, confirm/complete/cancel orders, and check the
-sales summary — all via tap-through inline menus.
+restocks and self-use entries, confirm/complete/cancel orders, check the sales
+summary, and pull the monthly report — all via tap-through inline menus.
 
 Setup:
 1. Create a bot with [@BotFather](https://t.me/BotFather) and copy its token.
@@ -74,6 +75,29 @@ sits in draft, and once more if it later stalls after payment confirmation. The
 poller scans for stale orders about every 5 minutes, independent of the message
 poll cycle.
 
+#### Monthly report delivery
+
+When a calendar month closes, the bot renders that month's audit report, archives
+it, and uploads the PDF to every whitelisted user with a caption carrying the
+headline figures. Toggle it under **Settings → Telegram Bot → Send the monthly
+report automatically**. Tap **📄 Monthly report** in the bot menu to pull any of
+the last six closed months on demand.
+
+The schedule is driven by a `last_report_period` settings row rather than a timer,
+so it behaves sensibly around restarts:
+
+- **A restart never resends.** The marker records the last month delivered; an
+  in-memory deadline would reset and re-fire.
+- **A fresh install never backfills.** With no marker yet, the last closed month
+  is recorded as already handled, so the first report you receive covers the first
+  month the shop actually ran with the feature.
+- **Downtime is caught up in order.** A shop offline across several month
+  boundaries gets each missed month, oldest first, capped at 12 per check.
+- **A Telegram outage retries.** The marker only advances once at least one
+  recipient has the file, so a failed send is re-attempted on the next check
+  (hourly) rather than silently skipping the month. The archive copy is written
+  either way.
+
 To enable the Flask debugger during development: `FLASK_DEBUG=1 ./start.sh`
 (never on a network you don't trust — the debugger allows code execution).
 
@@ -82,13 +106,16 @@ To enable the Flask debugger during development: `FLASK_DEBUG=1 ./start.sh`
 shop-inventory/
 ├── app.py              # Flask routes + web-layer validation
 ├── services.py         # Business logic shared by web routes and the bot
+├── reports.py          # Monthly audit report: data collection + PDF rendering
 ├── telegram_bot.py     # Telegram bot: API client, menus, flows, poller
 ├── i18n.py             # Translation table + helpers (web UI, JS, bot)
 ├── database.py         # SQLite schema, migrations, settings, DB connection
 ├── shop.db             # SQLite database file
+├── reports/            # Archived monthly report PDFs (gitignored)
 ├── start.sh            # Startup script
 ├── static/
 │   ├── css/style.css   # Application styles
+│   ├── fonts/          # Vendored DejaVu TTFs for PDF rendering
 │   └── js/app.js       # Client-side JavaScript
 └── templates/
     ├── base.html       # Base layout with sidebar navigation
@@ -204,6 +231,31 @@ The server starts at `http://localhost:5000`. Default login: **admin** / **admin
 - **Summary stats**: Revenue, completed orders, unique SKUs, items sold, restock cost, net profit, product value, self use
 - **Trend chart**: Daily revenue line chart (Chart.js)
 - **Top 3 / Bottom 3 sellers**: By quantity sold
+- **Monthly Report**: Pick a month, then **Download PDF** or **Send to Telegram**
+
+#### Monthly Report
+
+A PDF for one calendar month, for audit:
+
+- **Page 1** — the month's sales performance: revenue, completed orders, unique
+  SKUs, items sold, restock cost, net profit, self use, current stock value, plus
+  top 3 / bottom 3 sellers
+- **Sales Records** — every completed order, one row per product sold, with unit
+  price and subtotal
+- **Restock Records** — every batch, one row per product, with allocated cost
+- **Self Use Records** — every batch, one row per product, at the recorded price
+
+Notes:
+
+- Month boundaries follow the **shop timezone** from Settings, not the browser's,
+  so the archived file and the copy the bot sends always describe the same period
+- Written to `SHOP_REPORT_DIR` (`/data/reports` in Docker) as
+  `shop-report-YYYY-MM.pdf`, **overwritten** on regeneration rather than duplicated
+- The picker offers the current month too, as a month-to-date snapshot; the
+  scheduled report only ever covers closed months
+- Text is rendered with vendored DejaVu TTFs (`static/fonts/`) rather than a
+  built-in Latin-1 font, so a product name with a curly quote or an emoji cannot
+  break the report
 
 ---
 
@@ -238,9 +290,10 @@ check — failing loudly with logs if the new version doesn't come up.
 
 ### Where the data lives
 
-`shop.db` and `.secret_key` live in the `shop-data` Docker volume mounted at
-`/data`, deliberately outside the source tree: rebuilds, `git pull` and `git clean`
-cannot touch them. Deleting that volume deletes the inventory.
+`shop.db`, `.secret_key` and the `reports/` archive live in the `shop-data` Docker
+volume mounted at `/data`, deliberately outside the source tree: rebuilds,
+`git pull` and `git clean` cannot touch them. Deleting that volume deletes the
+inventory.
 
 ### Backups
 
@@ -257,6 +310,10 @@ so a backup that goes astray does not leak the bot (see
 ```
 0 22 * * * cd /path/to/shop-inventory && ./backup.sh >> backups/backup.log 2>&1
 ```
+
+`backup.sh` copies **only the database**. Monthly report PDFs are regenerable from
+it at any time, so they are not backed up — but if a signed-off PDF is your audit
+record of record, copy `/data/reports` separately.
 
 ### Secrets at rest
 
@@ -293,6 +350,7 @@ All variables are documented in `.env.example`. Summary:
 | `SHOP_SECRET_KEY` | auto-generated | Session signing key; persisted to `/data` if unset |
 | `SHOP_ENCRYPTION_KEY` | auto-generated | Encrypts the bot token at rest; persisted to `/data` if unset |
 | `SHOP_DB_PATH` / `SHOP_SECRET_KEY_PATH` / `SHOP_ENCRYPTION_KEY_PATH` | `/data/...` | State locations |
+| `SHOP_REPORT_DIR` | `/data/reports` | Where monthly report PDFs are archived |
 | `HOST_PORT` | `5000` | Host port to publish |
 | `LOG_LEVEL` | `INFO` | Log verbosity |
 | `SHOP_ENABLE_BOT` | `1` | Set `0` to run the web UI without the Telegram poller |
@@ -377,6 +435,26 @@ docker compose logs -f app
 6. The value appears as its own dashboard card and never changes revenue,
    restock cost, or net profit
 7. History shows batches; click any row to expand and see product-level breakdown
+
+### Generating the Monthly Report
+
+Automatically, once a month closes:
+
+1. The bot poller checks hourly whether the last closed month has been reported
+2. If not, it renders the PDF, writes it to `SHOP_REPORT_DIR`, and uploads it to
+   every whitelisted Telegram ID with a summary caption
+3. `last_report_period` advances only once at least one recipient has the file, so
+   a Telegram outage is retried rather than skipped
+
+By hand, for any month:
+
+1. Go to **Sales → Monthly Report**, pick a month
+2. **Download PDF** streams it to your browser; **Send to Telegram** pushes it to
+   the whitelist. Either way the archive copy is written
+3. Or in the bot: **📄 Monthly report**, then pick one of the last six months
+
+Every path calls the same `reports.build()`, so a report is identical no matter
+who asked for it or how.
 
 ### Order Lifecycle Diagram
 
