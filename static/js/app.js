@@ -126,60 +126,21 @@ function saveAccount(e) {
     }).catch(err => showToast(err.message, 'error'));
 }
 
-/* ===== Categories ===== */
-function openCategoryModal(id = null, name = '') {
-    document.getElementById('catId').value = id || '';
-    document.getElementById('catName').value = name;
-    document.getElementById('catModalTitle').textContent = id ? t('Edit Category') : t('Add Category');
-    document.getElementById('categoryModal').classList.add('active');
-}
-function closeCategoryModal() { document.getElementById('categoryModal').classList.remove('active'); }
-
-function editCategory(id, name) { openCategoryModal(id, name); }
-
-function deleteCategory(id) {
-    if (!confirm(t('Delete this category?'))) return;
-    api('/api/categories/' + id, 'DELETE').then(d => {
-        if (d.success) {
-            showToast(t('Category deleted'));
-            location.reload();
-        } else showToast(d.error, 'error');
-    });
-}
-
-function saveCategory(e) {
-    e.preventDefault();
-    const id = document.getElementById('catId').value;
-    const name = document.getElementById('catName').value.trim();
-    if (!name) return;
-    const method = id ? 'PUT' : 'POST';
-    const url = id ? '/api/categories/' + id : '/api/categories';
-    api(url, method, { name }).then(d => {
-        if (d.success) {
-            showToast(t('Category saved'));
-            location.reload();
-        } else showToast(d.error, 'error');
-    });
-}
-
 /* ===== Products ===== */
 function loadProducts() {
     const search = document.getElementById('searchProduct').value;
-    const category = document.getElementById('filterCategory').value;
     let url = '/api/products?';
     if (search) url += 'search=' + encodeURIComponent(search) + '&';
-    if (category) url += 'category=' + category + '&';
     fetch(url).then(r => r.json()).then(products => {
         const tbody = document.getElementById('productsBody');
         if (!products.length) {
-            tbody.innerHTML = `<tr><td colspan="6" class="empty-row">${t('No products found')}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="5" class="empty-row">${t('No products found')}</td></tr>`;
             return;
         }
         tbody.innerHTML = products.map(p => `
             <tr>
                 <td>${escapeHtml(p.sku || '-')}</td>
                 <td>${escapeHtml(p.name)}</td>
-                <td>${escapeHtml(p.category_name || '-')}</td>
                 <td>${formatRupiah(p.price)}</td>
                 <td>${p.stock_qty}</td>
                 <td class="action-cell">
@@ -204,7 +165,6 @@ function openProductModal(id = null) {
                 document.getElementById('productId').value = p.id;
                 document.getElementById('productName').value = p.name;
                 document.getElementById('productSku').value = p.sku || '';
-                document.getElementById('productCategory').value = p.category_id || '';
                 document.getElementById('productPrice').value = p.price;
                 document.getElementById('productStock').value = p.stock_qty;
                 document.getElementById('productStock').disabled = true;
@@ -226,7 +186,6 @@ function saveProduct(e) {
     const data = {
         name: document.getElementById('productName').value,
         sku: document.getElementById('productSku').value,
-        category_id: document.getElementById('productCategory').value || null,
         price: parseFloat(document.getElementById('productPrice').value) || 0,
         reorder_threshold: parseInt(document.getElementById('productThreshold').value) || 0
     };

@@ -89,7 +89,6 @@ def _validate_product(data):
     return {
         'name': name,
         'sku': sku,
-        'category_id': data.get('category_id') or None,
         'price': price,
         'reorder_threshold': threshold,
     }, None
@@ -197,10 +196,9 @@ def dashboard():
         LIMIT 5
     """).fetchall()
     low_stock_products = db.execute("""
-        SELECT p.*, c.name as category_name FROM products p
-        LEFT JOIN categories c ON p.category_id = c.id
-        WHERE p.is_archived = 0 AND p.stock_qty <= p.reorder_threshold
-        ORDER BY p.stock_qty ASC
+        SELECT * FROM products
+        WHERE is_archived = 0 AND stock_qty <= reorder_threshold
+        ORDER BY stock_qty ASC
         LIMIT 10
     """).fetchall()
     return render_template('dashboard.html',
@@ -218,94 +216,24 @@ def dashboard():
         format_rupiah=format_rupiah
     )
 
-# --- Categories ---
-@app.route('/categories')
-@login_required
-def categories_page():
-    categories = g.db.execute("SELECT * FROM categories ORDER BY name").fetchall()
-    return render_template('categories.html', categories=categories)
-
-@app.route('/api/categories', methods=['GET'])
-@login_required
-def api_categories():
-    categories = g.db.execute("SELECT * FROM categories ORDER BY name").fetchall()
-    return jsonify([dict(r) for r in categories])
-
-@app.route('/api/categories', methods=['POST'])
-@login_required
-def api_create_category():
-    data = _json_body()
-    if data is None:
-        return _err('Invalid JSON body')
-    name = data.get('name')
-    name = name.strip() if isinstance(name, str) else ''
-    if not name:
-        return _err('Name required')
-    try:
-        g.db.execute("INSERT INTO categories (name) VALUES (?)", (name,))
-        g.db.commit()
-        return jsonify({'success': True})
-    except sqlite3.IntegrityError:
-        return _err('Category already exists')
-
-@app.route('/api/categories/<int:id>', methods=['PUT'])
-@login_required
-def api_update_category(id):
-    data = _json_body()
-    if data is None:
-        return _err('Invalid JSON body')
-    name = data.get('name')
-    name = name.strip() if isinstance(name, str) else ''
-    if not name:
-        return _err('Name required')
-    try:
-        g.db.execute("UPDATE categories SET name = ? WHERE id = ?", (name, id))
-        g.db.commit()
-        return jsonify({'success': True})
-    except sqlite3.IntegrityError:
-        return _err('Category already exists')
-
-@app.route('/api/categories/<int:id>', methods=['DELETE'])
-@login_required
-def api_delete_category(id):
-    used = g.db.execute("SELECT COUNT(*) as cnt FROM products WHERE category_id = ?", (id,)).fetchone()['cnt']
-    if used > 0:
-        return _err('Category has products assigned')
-    g.db.execute("DELETE FROM categories WHERE id = ?", (id,))
-    g.db.commit()
-    return jsonify({'success': True})
-
 # --- Products ---
 @app.route('/products')
 @login_required
 def products_page():
-    products = g.db.execute("""
-        SELECT p.*, c.name as category_name
-        FROM products p LEFT JOIN categories c ON p.category_id = c.id
-        WHERE p.is_archived = 0
-        ORDER BY p.name
-    """).fetchall()
-    categories = g.db.execute("SELECT * FROM categories ORDER BY name").fetchall()
-    return render_template('products.html', products=products, categories=categories, format_rupiah=format_rupiah)
+    products = g.db.execute(
+        "SELECT * FROM products WHERE is_archived = 0 ORDER BY name").fetchall()
+    return render_template('products.html', products=products, format_rupiah=format_rupiah)
 
 @app.route('/api/products', methods=['GET'])
 @login_required
 def api_products():
     search = request.args.get('search', '')
-    category = request.args.get('category', '')
-    query = """
-        SELECT p.*, c.name as category_name
-        FROM products p LEFT JOIN categories c ON p.category_id = c.id
-        WHERE p.is_archived = 0
-    """
+    query = "SELECT * FROM products WHERE is_archived = 0"
     params = []
     if search:
-        query += " AND (p.name LIKE ? OR p.sku LIKE ?)"
+        query += " AND (name LIKE ? OR sku LIKE ?)"
         params.extend([f'%{search}%', f'%{search}%'])
-    if category:
-        query += " AND p.category_id = ?"
-        params.append(category)
-    query += " ORDER BY p.name"
+    query += " ORDER BY name"
     products = g.db.execute(query, params).fetchall()
     return jsonify([dict(r) for r in products])
 
@@ -326,10 +254,10 @@ def api_create_product():
         return _err('Stock must be 0 or more')
     try:
         cur = g.db.execute("""
-            INSERT INTO products (name, sku, category_id, price, stock_qty, reorder_threshold)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (fields['name'], fields['sku'], fields['category_id'],
-              fields['price'], stock_qty, fields['reorder_threshold']))
+            INSERT INTO products (name, sku, price, stock_qty, reorder_threshold)
+            VALUES (?, ?, ?, ?, ?)
+        """, (fields['name'], fields['sku'], fields['price'], stock_qty,
+              fields['reorder_threshold']))
         g.db.commit()
         return jsonify({'success': True, 'id': cur.lastrowid})
     except sqlite3.IntegrityError:
@@ -348,10 +276,10 @@ def api_update_product(id):
         # stock_qty is deliberately not updatable here: overwriting it from a stale edit
         # form would erase concurrent sales. Stock changes go through orders and restock.
         g.db.execute("""
-            UPDATE products SET name=?, sku=?, category_id=?, price=?, reorder_threshold=?, updated_at=CURRENT_TIMESTAMP
+            UPDATE products SET name=?, sku=?, price=?, reorder_threshold=?, updated_at=CURRENT_TIMESTAMP
             WHERE id=?
-        """, (fields['name'], fields['sku'], fields['category_id'],
-              fields['price'], fields['reorder_threshold'], id))
+        """, (fields['name'], fields['sku'], fields['price'],
+              fields['reorder_threshold'], id))
         g.db.commit()
         return jsonify({'success': True})
     except sqlite3.IntegrityError:

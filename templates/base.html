@@ -15,7 +15,6 @@
         <ul class="nav-links">
             <li><a href="{{ url_for('dashboard') }}" class="{% if request.endpoint == 'dashboard' %}active{% endif %}">📊 {{ t('Dashboard') }}</a></li>
             <li><a href="{{ url_for('products_page') }}" class="{% if request.endpoint == 'products_page' %}active{% endif %}">📦 {{ t('Products') }}</a></li>
-            <li><a href="{{ url_for('categories_page') }}" class="{% if request.endpoint == 'categories_page' %}active{% endif %}">🏷️ {{ t('Categories') }}</a></li>
             <li><a href="{{ url_for('orders_page') }}" class="{% if request.endpoint == 'orders_page' %}active{% endif %}">🛒 {{ t('Orders') }}</a></li>
             <li><a href="{{ url_for('restock_page') }}" class="{% if request.endpoint == 'restock_page' %}active{% endif %}">📥 {{ t('Restock') }}</a></li>
             <li><a href="{{ url_for('self_use_page') }}" class="{% if request.endpoint == 'self_use_page' %}active{% endif %}">🏠 {{ t('Self Use') }}</a></li>

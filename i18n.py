@@ -26,7 +26,6 @@ TRANSLATIONS = {
         'Shop Inventory': 'Inventaris Toko',
         'Dashboard': 'Dasbor',
         'Products': 'Produk',
-        'Categories': 'Kategori',
         'Orders': 'Pesanan',
         'Restock': 'Restok',
         'Self Use': 'Pemakaian Sendiri',
@@ -45,7 +44,6 @@ TRANSLATIONS = {
         # --- Common ---
         'Name': 'Nama',
         'Name *': 'Nama *',
-        'Category': 'Kategori',
         'Stock': 'Stok',
         'Status': 'Status',
         'Total': 'Total',
@@ -56,9 +54,7 @@ TRANSLATIONS = {
         'Revenue': 'Pendapatan',
         'Save': 'Simpan',
         'Cancel': 'Batal',
-        'None': 'Tidak ada',
         'Edit': 'Edit',
-        'Delete': 'Hapus',
         'Archive': 'Arsipkan',
         'View': 'Lihat',
         'Confirm': 'Konfirmasi',
@@ -94,7 +90,6 @@ TRANSLATIONS = {
         # --- Products ---
         '+ Add Product': '+ Tambah Produk',
         'Search products...': 'Cari produk...',
-        'All Categories': 'Semua Kategori',
         'SKU': 'SKU',
         'Sale Price': 'Harga Jual',
         'Add Product': 'Tambah Produk',
@@ -108,17 +103,6 @@ TRANSLATIONS = {
         'Product saved': 'Produk tersimpan',
         'Archive this product?': 'Arsipkan produk ini?',
         'Product archived': 'Produk diarsipkan',
-
-        # --- Categories ---
-        '+ Add Category': '+ Tambah Kategori',
-        'Created': 'Dibuat',
-        'No categories yet': 'Belum ada kategori',
-        'Add Category': 'Tambah Kategori',
-        'Edit Category': 'Edit Kategori',
-        'Category Name *': 'Nama Kategori *',
-        'Delete this category?': 'Hapus kategori ini?',
-        'Category deleted': 'Kategori dihapus',
-        'Category saved': 'Kategori tersimpan',
 
         # --- Orders ---
         '+ New Order': '+ Pesanan Baru',
@@ -192,7 +176,6 @@ TRANSLATIONS = {
         'Qty Sold': 'Jml Terjual',
         'Share': 'Kontribusi',
         'Products With No Sales': 'Produk Tanpa Penjualan',
-        'Stock': 'Stok',
         'Stock Value': 'Nilai Stok',
         'All products sold at least once': 'Semua produk terjual setidaknya sekali',
         'Stock value at risk: {amount}': 'Nilai stok menganggur: {amount}',
@@ -397,8 +380,6 @@ TRANSLATIONS = {
         'Reorder threshold must be a whole number':
             'Ambang pemesanan ulang harus berupa bilangan bulat',
         'Reorder threshold must be 0 or more': 'Ambang pemesanan ulang harus 0 atau lebih',
-        'Category already exists': 'Kategori sudah ada',
-        'Category has products assigned': 'Kategori masih memiliki produk',
         'Stock must be a whole number': 'Stok harus berupa bilangan bulat',
         'Stock must be 0 or more': 'Stok harus 0 atau lebih',
         'SKU already exists': 'SKU sudah ada',

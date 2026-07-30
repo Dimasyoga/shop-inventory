@@ -13,7 +13,7 @@ A Flask-based shop inventory management system built with Python 3.14, SQLite, a
 
 ### Features
 - User authentication (default: `admin` / `admin123`, hashed at rest; change it in Settings)
-- Product catalog with categories, SKU, pricing, and stock tracking
+- Product catalog with SKU, pricing, and stock tracking
 - Order management with lifecycle: draft → confirmed → completed (or cancelled)
 - Batch-level restock system with cost allocation
 - Self-use tracking for stock the seller takes for themself (no revenue)
@@ -121,7 +121,6 @@ shop-inventory/
     ├── base.html       # Base layout with sidebar navigation
     ├── login.html      # Login page
     ├── dashboard.html  # Overview with stats and alerts
-    ├── categories.html # Category CRUD
     ├── products.html   # Product catalog with stock management
     ├── orders.html     # Order creation and lifecycle
     ├── restock.html    # Batch restock with cost tracking
@@ -154,11 +153,18 @@ The database is created automatically on first run. `database.py` handles:
 - Seeding the first user (`admin` / `admin123`, or `SHOP_ADMIN_USERNAME` /
   `SHOP_ADMIN_PASSWORD` if set — only ever on an empty database)
 
+> **Upgrading past the categories removal:** product categories were dropped as a
+> feature that cost a step at product creation and returned nothing over plain SKUs.
+> The first start on an older database **drops the `categories` table** and rebuilds
+> `products` without its `category_id` column. Products, their ids and all history
+> referencing them are carried across, and the migration aborts rather than leaving
+> a broken reference behind — but the category names themselves are gone for good.
+> Run `./backup.sh` first if you want them recoverable.
+
 ### Database Schema
 | Table | Purpose |
 |---|---|
 | `users` | Authentication (username, password) |
-| `categories` | Product categories |
 | `products` | Product catalog (SKU, price, stock, threshold) |
 | `stock_logs` | Stock adjustment audit trail |
 | `orders` | Order header (status, total) |
@@ -191,13 +197,9 @@ The server starts at `http://localhost:5000`. Default login: **admin** / **admin
 - **Recent Orders**: Last 5 orders with status and amount
 - **Low Stock Alerts**: Products at or below reorder threshold
 
-#### Categories (`/categories`)
-- List, create, edit, and delete product categories
-- Cannot delete a category that has products assigned
-
 #### Products (`/products`)
-- Search by name/SKU, filter by category
-- Add/edit products with name, SKU, category, price, stock qty, reorder threshold
+- Search by name/SKU
+- Add/edit products with name, SKU, price, stock qty, reorder threshold
 - Stock adjustment modal for manual corrections (shows warning about cost accuracy)
 - Archive products (soft delete) instead of permanent deletion
 
@@ -410,7 +412,6 @@ docker compose logs -f app
 2. Fill in:
    - **Name** (required): Product display name
    - **SKU** (optional): Unique stock-keeping unit identifier
-   - **Category**: Assign to an existing category
    - **Price** (required): Selling price in Rupiah
    - **Stock Qty**: Initial inventory count
    - **Reorder Threshold**: Stock level that triggers low-stock alert

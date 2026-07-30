@@ -128,24 +128,16 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
-        CREATE TABLE IF NOT EXISTS categories (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-
         CREATE TABLE IF NOT EXISTS products (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
             sku TEXT UNIQUE,
-            category_id INTEGER,
             price REAL NOT NULL DEFAULT 0,
             stock_qty INTEGER NOT NULL DEFAULT 0,
             reorder_threshold INTEGER NOT NULL DEFAULT 0,
             is_archived INTEGER NOT NULL DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (category_id) REFERENCES categories(id)
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
         CREATE TABLE IF NOT EXISTS stock_logs (
@@ -238,6 +230,55 @@ def init_db():
             FOREIGN KEY (batch_id) REFERENCES restock_batches(id),
             FOREIGN KEY (product_id) REFERENCES products(id)
         )''')
+
+    # Migrate: drop the categories feature. It earned nothing over plain SKUs and
+    # only added a step to product creation.
+    #
+    # products.category_id is named in a table-level FOREIGN KEY, and SQLite refuses
+    # ALTER TABLE DROP COLUMN for such a column, so products must be rebuilt. The old
+    # table is renamed aside and the new one created under the real name, rather than
+    # building `products_new` and renaming it into place: order_items, restock_items,
+    # self_use_items and stock_logs all carry foreign keys onto products, and
+    # legacy_alter_table keeps this rename from rewriting them to follow the old
+    # table. They keep pointing at `products`, which exists again by the time
+    # enforcement comes back on.
+    product_cols = [r[1] for r in c.execute("PRAGMA table_info(products)").fetchall()]
+    if 'category_id' in product_cols:
+        conn.commit()  # neither PRAGMA below can change inside a transaction
+        c.execute("PRAGMA foreign_keys=OFF")
+        c.execute("PRAGMA legacy_alter_table=ON")
+        c.execute("ALTER TABLE products RENAME TO products_pre_categories_drop")
+        c.execute('''CREATE TABLE products (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            sku TEXT UNIQUE,
+            price REAL NOT NULL DEFAULT 0,
+            stock_qty INTEGER NOT NULL DEFAULT 0,
+            reorder_threshold INTEGER NOT NULL DEFAULT 0,
+            is_archived INTEGER NOT NULL DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )''')
+        # Explicit column list, and ids are carried over: every other table
+        # references products(id), so the values must survive the rebuild.
+        c.execute('''INSERT INTO products
+            (id, name, sku, price, stock_qty, reorder_threshold, is_archived,
+             created_at, updated_at)
+            SELECT id, name, sku, price, stock_qty, reorder_threshold, is_archived,
+                   created_at, updated_at
+            FROM products_pre_categories_drop''')
+        c.execute("DROP TABLE products_pre_categories_drop")
+        conn.commit()
+        c.execute("PRAGMA legacy_alter_table=OFF")
+        c.execute("PRAGMA foreign_keys=ON")
+        orphans = c.execute("PRAGMA foreign_key_check").fetchall()
+        if orphans:
+            # Never leave the shop running on a store whose references went stale.
+            raise RuntimeError(
+                f'dropping categories left {len(orphans)} broken foreign key(s); '
+                'restore the pre-upgrade backup and report this')
+        log.warning('rebuilt products without category_id and dropped the categories table')
+    c.execute("DROP TABLE IF EXISTS categories")
 
     # Migrate: track which order status a stale-order alert was last sent for, so
     # the Telegram bot notifies once per stalling status instead of every cycle.

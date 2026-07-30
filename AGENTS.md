@@ -49,7 +49,15 @@ bilingual (English / Bahasa Indonesia).
   so web-UI changes apply with no restart.
 - **Migrations** live in `init_db()` and must be idempotent (guard with
   `PRAGMA table_info` / `sqlite_master` checks). New columns go both in the
-  `CREATE TABLE` block *and* a guarded `ALTER TABLE` for existing DBs.
+  `CREATE TABLE` block *and* a guarded `ALTER TABLE` for existing DBs. *Removing* a
+  foreign-keyed column means rebuilding the table — SQLite rejects `DROP COLUMN` on
+  one named in a constraint. Follow the categories-removal migration: rename the old
+  table aside under `legacy_alter_table=ON` so the foreign keys in `order_items`,
+  `stock_logs` and friends are not rewritten to follow it, recreate the table under
+  its real name, copy rows **with their ids**, then verify with
+  `PRAGMA foreign_key_check` and refuse to continue if anything dangles.
+  `tests/test_migrations.py` builds an old-shaped database and asserts the outcome;
+  extend it rather than trusting a destructive migration by inspection.
 - **`ServiceError`** carries an English `template` + `params` for translation via
   `i18n.translate_error`; `str(e)` still yields English for logs.
 - **The bot poller** advances its update offset even when handling an update

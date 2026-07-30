@@ -64,9 +64,8 @@ def test_history_rejects_bad_period(client):
 
 def test_history_includes_nested_items(client, insert):
     batch = insert("restock_batches", stamp(utc_now()), total_cost=5000)
-    cat = insert("categories", stamp(utc_now()), name="Drinks")
     prod = insert("products", stamp(utc_now()), name="Kopi", sku="K1", price=5000,
-                  stock_qty=10, category_id=cat)
+                  stock_qty=10)
     conn_items = {"batch_id": batch, "product_id": prod, "qty_added": 3, "allocated_cost": 5000}
     import database
     conn = database.get_db()
@@ -145,9 +144,8 @@ def _completed_order(insert, when, amount, product_id):
 
 @pytest.fixture
 def product(insert):
-    cat = insert("categories", stamp(utc_now()), name="Drinks")
     return insert("products", stamp(utc_now()), name="Kopi", sku="K1", price=5000,
-                  stock_qty=10, category_id=cat)
+                  stock_qty=10)
 
 
 def test_day_summary_finds_an_order_from_seconds_ago(client, insert, product):

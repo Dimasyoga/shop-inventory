@@ -255,7 +255,6 @@ def test_valid_order_still_works(client, product):
     ("/api/orders", "post"),
     ("/api/restock", "post"),
     ("/api/self-use", "post"),
-    ("/api/categories", "post"),
     ("/api/stock/adjust", "post"),
 ])
 def test_non_json_body_returns_400(client, path, method):
@@ -353,12 +352,6 @@ def test_product_pages_do_not_embed_raw_script(client, product):
         html = client.get(path).get_data(as_text=True)
         assert "</script><img" not in html, f"{path} embeds the raw payload"
         assert "\\u003c" in html  # tojson escaped it
-
-
-def test_category_edit_button_escapes_name(client):
-    client.post("/api/categories", json={"name": "O'Brien \"quotes\" <tag>"})
-    html = client.get("/categories").get_data(as_text=True)
-    assert "<tag>" not in html
 
 
 def test_api_still_returns_raw_name(client, product):

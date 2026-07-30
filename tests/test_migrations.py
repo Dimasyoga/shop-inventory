@@ -1,0 +1,155 @@
+"""init_db upgrading a database written by an older version.
+
+The categories removal is the first destructive migration in this app: it rebuilds
+products to shed a foreign-keyed column. Other tables reference products(id), so the
+risk is not the dropped column but the rows and references around it.
+"""
+import sqlite3
+
+import pytest
+
+import database
+
+# products as it stood before categories were removed, plus the tables that hang
+# foreign keys off it.
+PRE_CATEGORIES_SCHEMA = '''
+CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL,
+    password TEXT NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE products (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, sku TEXT UNIQUE,
+    category_id INTEGER, price REAL NOT NULL DEFAULT 0, stock_qty INTEGER NOT NULL DEFAULT 0,
+    reorder_threshold INTEGER NOT NULL DEFAULT 0, is_archived INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (category_id) REFERENCES categories(id));
+CREATE TABLE stock_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, product_id INTEGER NOT NULL,
+    change_qty INTEGER NOT NULL, reason TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (product_id) REFERENCES products(id));
+CREATE TABLE orders (id INTEGER PRIMARY KEY AUTOINCREMENT, status TEXT NOT NULL DEFAULT 'draft',
+    total_amount REAL NOT NULL DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE order_items (id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER NOT NULL,
+    product_id INTEGER NOT NULL, quantity INTEGER NOT NULL, unit_price REAL NOT NULL,
+    subtotal REAL NOT NULL, FOREIGN KEY (order_id) REFERENCES orders(id),
+    FOREIGN KEY (product_id) REFERENCES products(id));
+CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+
+INSERT INTO categories (name) VALUES ('sabun'), ('susu');
+-- Non-contiguous ids on purpose: other tables reference these values, so the
+-- rebuild must carry them across rather than renumbering.
+INSERT INTO products (id, name, sku, category_id, price, stock_qty, reorder_threshold, is_archived)
+    VALUES (7, 'Kopi', 'KP-1', 1, 25000, 100, 5, 0),
+           (9, 'Teh', 'TM-1', NULL, 2000, 50, 3, 0),
+           (11, 'Arsip', 'AR-1', 2, 500, 0, 0, 1);
+INSERT INTO orders (id, status, total_amount) VALUES (3, 'completed', 50000);
+INSERT INTO order_items (order_id, product_id, quantity, unit_price, subtotal)
+    VALUES (3, 7, 2, 25000, 50000);
+INSERT INTO stock_logs (product_id, change_qty, reason) VALUES (7, -2, 'sale order #3');
+'''
+
+
+@pytest.fixture
+def legacy_db(tmp_path, monkeypatch):
+    """A pre-categories-removal database, migrated by init_db()."""
+    path = tmp_path / "legacy.db"
+    conn = sqlite3.connect(str(path))
+    conn.executescript(PRE_CATEGORIES_SCHEMA)
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(database, "DB_PATH", str(path))
+    monkeypatch.delenv("SHOP_ENCRYPTION_KEY", raising=False)
+    monkeypatch.setattr(database, "ENCRYPTION_KEY_PATH", str(tmp_path / "legacy.key"))
+    database.init_db()
+    return str(path)
+
+
+def query(path, sql, params=()):
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys=ON")
+    try:
+        return [dict(r) for r in conn.execute(sql, params)]
+    finally:
+        conn.close()
+
+
+def test_categories_table_is_gone(legacy_db):
+    tables = {r["name"] for r in query(
+        legacy_db, "SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "categories" not in tables
+
+
+def test_category_id_column_is_gone(legacy_db):
+    cols = {r["name"] for r in query(legacy_db, "PRAGMA table_info(products)")}
+    assert "category_id" not in cols
+    assert cols == {"id", "name", "sku", "price", "stock_qty", "reorder_threshold",
+                    "is_archived", "created_at", "updated_at"}
+
+
+def test_the_rebuild_leaves_no_scratch_table_behind(legacy_db):
+    tables = {r["name"] for r in query(
+        legacy_db, "SELECT name FROM sqlite_master WHERE type='table'")}
+    assert not [t for t in tables if "pre_categories" in t]
+
+
+def test_every_product_survives_with_its_id_and_values(legacy_db):
+    rows = query(legacy_db, "SELECT id, name, sku, price, stock_qty, reorder_threshold,"
+                            " is_archived FROM products ORDER BY id")
+    assert rows == [
+        {"id": 7, "name": "Kopi", "sku": "KP-1", "price": 25000.0, "stock_qty": 100,
+         "reorder_threshold": 5, "is_archived": 0},
+        {"id": 9, "name": "Teh", "sku": "TM-1", "price": 2000.0, "stock_qty": 50,
+         "reorder_threshold": 3, "is_archived": 0},
+        # The archived product must come across too -- it is still referenced by history.
+        {"id": 11, "name": "Arsip", "sku": "AR-1", "price": 500.0, "stock_qty": 0,
+         "reorder_threshold": 0, "is_archived": 1},
+    ]
+
+
+def test_no_reference_is_left_dangling(legacy_db):
+    assert query(legacy_db, "PRAGMA foreign_key_check") == []
+
+
+def test_history_still_joins_to_its_product(legacy_db):
+    # The rebuild drops and recreates products; if other tables' foreign keys had
+    # been rewritten to follow the renamed-aside table, these joins would come back
+    # empty and the shop would silently lose its history.
+    assert query(legacy_db, "SELECT p.name FROM order_items oi"
+                            " JOIN products p ON p.id = oi.product_id") == [{"name": "Kopi"}]
+    assert query(legacy_db, "SELECT p.name FROM stock_logs sl"
+                            " JOIN products p ON p.id = sl.product_id") == [{"name": "Kopi"}]
+
+
+def test_foreign_keys_are_enforced_again_afterwards(legacy_db):
+    conn = sqlite3.connect(legacy_db)
+    conn.execute("PRAGMA foreign_keys=ON")
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("INSERT INTO order_items (order_id, product_id, quantity, unit_price,"
+                     " subtotal) VALUES (3, 999, 1, 1, 1)")
+    conn.close()
+
+
+def test_new_products_continue_the_id_sequence(legacy_db):
+    # AUTOINCREMENT state lives in sqlite_sequence; losing it would hand a new
+    # product an id that old history already refers to.
+    conn = sqlite3.connect(legacy_db)
+    new_id = conn.execute(
+        "INSERT INTO products (name, price) VALUES ('Baru', 1) RETURNING id").fetchone()[0]
+    conn.commit()
+    conn.close()
+    assert new_id > 11
+
+
+def test_migrating_twice_changes_nothing(legacy_db):
+    before = query(legacy_db, "SELECT * FROM products ORDER BY id")
+    database.init_db()
+    assert query(legacy_db, "SELECT * FROM products ORDER BY id") == before
+    assert query(legacy_db, "PRAGMA foreign_key_check") == []
+
+
+def test_a_fresh_database_never_creates_categories(db_path):
+    tables = {r["name"] for r in query(
+        db_path, "SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "categories" not in tables
+    assert "products" in tables
