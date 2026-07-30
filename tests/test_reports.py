@@ -23,22 +23,24 @@ EN = i18n.make_t("en")
 def shop(insert):
     """A product, and helpers to backdate records against it."""
     pid = insert("products", "2026-01-01 00:00:00", name="Kopi", sku="KP-1",
-                 price=15000, stock_qty=100)
+                 price=15000, cost_price=9000, stock_qty=100)
 
     def order(created_at, qty, status="completed", total=45000):
         oid = insert("orders", created_at, status=status, total_amount=total)
         conn = database.get_db()
-        conn.execute("INSERT INTO order_items (order_id, product_id, quantity, unit_price, subtotal)"
-                     " VALUES (?, ?, ?, ?, ?)", (oid, pid, qty, 15000, 15000 * qty))
+        conn.execute("INSERT INTO order_items (order_id, product_id, quantity, unit_price,"
+                     " unit_cost, subtotal) VALUES (?, ?, ?, ?, ?, ?)",
+                     (oid, pid, qty, 15000, 9000, 15000 * qty))
         conn.commit()
         conn.close()
         return oid
 
     def restock(created_at, qty, cost=100000):
-        bid = insert("restock_batches", created_at, total_cost=cost)
+        bid = insert("restock_batches", created_at, subtotal_cost=cost, total_cost=cost)
         conn = database.get_db()
-        conn.execute("INSERT INTO restock_items (batch_id, product_id, qty_added, allocated_cost)"
-                     " VALUES (?, ?, ?, ?)", (bid, pid, qty, cost))
+        conn.execute("INSERT INTO restock_items (batch_id, product_id, qty_added, unit_price,"
+                     " unit_cost, allocated_cost) VALUES (?, ?, ?, ?, ?, ?)",
+                     (bid, pid, qty, cost / qty, cost / qty, cost))
         conn.commit()
         conn.close()
         return bid
@@ -153,26 +155,34 @@ def test_summary_describes_the_reported_month_not_today(db_path, shop):
     assert s["self_use_value"] == 30000
     # Self use is reported beside profit, never inside it.
     assert s["net_profit"] == 45000 - 100000
+    # Gross profit costs only what was sold (3 x 9000), so the month reads as profitable
+    # on the goods even while the restock spend puts net profit under water.
+    assert s["cogs"] == 27000
+    assert s["gross_profit"] == 45000 - 27000
 
 
-def test_collect_ranks_products_by_value_as_well_as_quantity(db_path, insert):
+def test_collect_ranks_products_by_profit_as_well_as_quantity(db_path, insert):
     cheap = insert("products", "2026-01-01 00:00:00", name="Teh", sku="TM-1",
-                   price=2000, stock_qty=50)
+                   price=2000, cost_price=1000, stock_qty=50)
     pricey = insert("products", "2026-01-01 00:00:00", name="Kopi", sku="KP-1",
-                    price=50000, stock_qty=20)
+                    price=50000, cost_price=45000, stock_qty=20)
     conn = database.get_db()
-    for pid, qty, price in ((cheap, 100, 2000), (pricey, 6, 50000)):
+    for pid, qty, price, cost in ((cheap, 100, 2000, 1000), (pricey, 6, 50000, 45000)):
         cur = conn.execute("INSERT INTO orders (status, total_amount, created_at)"
                            " VALUES ('completed', ?, '2026-06-10 03:00:00')", (qty * price,))
         conn.execute("INSERT INTO order_items (order_id, product_id, quantity, unit_price,"
-                     " subtotal) VALUES (?, ?, ?, ?, ?)",
-                     (cur.lastrowid, pid, qty, price, qty * price))
+                     " unit_cost, subtotal) VALUES (?, ?, ?, ?, ?, ?)",
+                     (cur.lastrowid, pid, qty, price, cost, qty * price))
     conn.commit()
     conn.close()
     data = collect(offset=1)
     assert data["by_quantity"][0]["name"] == "Teh"       # 100 units
-    assert data["by_value"][0]["name"] == "Kopi"         # Rp 300.000 of Rp 500.000
-    assert data["by_value"][0]["share"] == pytest.approx(60.0)
+    # Kopi took Rp 300.000 of the Rp 500.000 revenue but kept only Rp 30.000 of the
+    # Rp 130.000 profit, so the profit ranking puts Teh first.
+    assert data["by_profit"][0]["name"] == "Teh"
+    assert data["by_profit"][0]["total_profit"] == 100000
+    assert data["by_profit"][0]["share"] == pytest.approx(100000 / 130000 * 100)
+    assert data["uncosted_sales"] == 0
 
 
 def test_collect_lists_products_with_no_sales(db_path, shop):

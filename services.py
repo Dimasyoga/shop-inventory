@@ -150,14 +150,17 @@ def create_order(db, items):
             raise ServiceError('Insufficient stock for {name}', name=product['name'])
         subtotal = product['price'] * item['quantity']
         total += subtotal
-        rows.append((item['product_id'], item['quantity'], product['price'], subtotal))
+        # unit_cost is snapshotted alongside unit_price for the same reason: a later
+        # restock at a different price must not rewrite the margin of a sale already made.
+        rows.append((item['product_id'], item['quantity'], product['price'],
+                     product['cost_price'], subtotal))
 
     cur = db.execute("INSERT INTO orders (status, total_amount) VALUES (?, ?)", ('draft', total))
     order_id = cur.lastrowid
     db.executemany("""
-        INSERT INTO order_items (order_id, product_id, quantity, unit_price, subtotal)
-        VALUES (?, ?, ?, ?, ?)
-    """, [(order_id, pid, qty, price, subtotal) for pid, qty, price, subtotal in rows])
+        INSERT INTO order_items (order_id, product_id, quantity, unit_price, unit_cost, subtotal)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, [(order_id, pid, qty, price, cost, subtotal) for pid, qty, price, cost, subtotal in rows])
     db.commit()
     return {'order_id': order_id, 'total': total}
 
@@ -209,32 +212,104 @@ def cancel_order(db, order_id):
 
 # --- Restock ---
 
-def create_restock(db, items, total_cost):
-    """items = [{'product_id': int, 'qty': int}] (shape pre-validated). Returns batch_id."""
-    total_qty = 0
+def allocate_restock_costs(items, discount=0, shipping_cost=0, admin_fee=0):
+    """Landed cost per line from a supplier invoice.
+
+    items = [{'product_id': int, 'qty': int, 'unit_price': float}] -- the invoice as
+    written, one line per product at its listed price. The three charges apply to the
+    invoice as a whole, so each line absorbs them in proportion to its own value: a
+    voucher discounts what was actually bought, and shipping rides on the goods rather
+    than falling equally on a cheap line and an expensive one.
+
+    Returns (lines, subtotal, total_cost) where each line is
+    {'product_id', 'qty', 'unit_price', 'unit_cost', 'line_cost'} and the line costs sum
+    to total_cost -- the money actually paid.
+    """
+    subtotal = sum(item['qty'] * item['unit_price'] for item in items)
+    total_qty = sum(item['qty'] for item in items)
+    total_cost = subtotal - discount + shipping_cost + admin_fee
+
+    lines = []
     for item in items:
-        product = db.execute("SELECT * FROM products WHERE id = ?", (item['product_id'],)).fetchone()
+        qty = item['qty']
+        if subtotal > 0:
+            share = (qty * item['unit_price']) / subtotal
+        elif total_qty > 0:
+            # A batch priced entirely at zero -- a supplier sample, say -- still has
+            # shipping to spread, and there are no line values to weight it by.
+            share = qty / total_qty
+        else:
+            share = 0
+        line_cost = total_cost * share
+        lines.append({
+            'product_id': item['product_id'],
+            'qty': qty,
+            'unit_price': item['unit_price'],
+            'unit_cost': line_cost / qty if qty else 0,
+            'line_cost': line_cost,
+        })
+    return lines, subtotal, total_cost
+
+
+def _blend_cost(old_cost, stock_qty, new_unit_cost, qty):
+    """Weighted average of the stock on hand and an incoming batch.
+
+    Blending against an unrecorded cost (0) would halve the real figure, and stock that
+    ran out carries no cost to average, so both cases adopt the new cost outright.
+    """
+    if stock_qty <= 0 or not old_cost:
+        return new_unit_cost
+    return (stock_qty * old_cost + qty * new_unit_cost) / (stock_qty + qty)
+
+
+def create_restock(db, items, discount=0, shipping_cost=0, admin_fee=0):
+    """items = [{'product_id': int, 'qty': int, 'unit_price': float}] (shape pre-validated).
+
+    Records the invoice, adds the stock, and rolls each product's cost_price forward as a
+    weighted average of what it already held and what this batch cost.
+
+    Returns {'batch_id', 'subtotal', 'total_cost'}.
+    """
+    for item in items:
+        product = db.execute("SELECT id FROM products WHERE id = ?", (item['product_id'],)).fetchone()
         if not product:
             raise NotFoundError('Product {id} not found', id=item['product_id'])
-        total_qty += item['qty']
 
-    cur = db.execute("INSERT INTO restock_batches (total_cost) VALUES (?)", (total_cost,))
+    lines, subtotal, total_cost = allocate_restock_costs(items, discount, shipping_cost, admin_fee)
+    if discount > subtotal:
+        # Left through, the excess would land as a negative cost on every line.
+        raise ServiceError('Discount cannot exceed the invoice subtotal')
+
+    cur = db.execute(
+        "INSERT INTO restock_batches (subtotal_cost, discount, shipping_cost, admin_fee, total_cost)"
+        " VALUES (?, ?, ?, ?, ?)",
+        (subtotal, discount, shipping_cost, admin_fee, total_cost))
     batch_id = cur.lastrowid
-    for item in items:
-        qty_added = item['qty']
-        allocated_cost = (qty_added / total_qty) * total_cost if total_qty > 0 else 0
-        cur = db.execute(
-            "UPDATE products SET stock_qty = stock_qty + ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-            (qty_added, item['product_id']))
-        if cur.rowcount == 0:
+    for line in lines:
+        product_id = line['product_id']
+        # Read the stock and cost fresh per line rather than reusing the validation pass:
+        # a batch may list the same product twice, and the second line has to average onto
+        # what the first one already produced.
+        product = db.execute("SELECT stock_qty, cost_price FROM products WHERE id = ?",
+                             (product_id,)).fetchone()
+        if not product:
             db.rollback()
-            raise NotFoundError('Product {id} not found', id=item['product_id'])
-        db.execute("INSERT INTO restock_items (batch_id, product_id, qty_added, allocated_cost) VALUES (?, ?, ?, ?)",
-                   (batch_id, item['product_id'], qty_added, allocated_cost))
+            raise NotFoundError('Product {id} not found', id=product_id)
+        cost_price = _blend_cost(product['cost_price'], product['stock_qty'],
+                                 line['unit_cost'], line['qty'])
+        db.execute(
+            "UPDATE products SET stock_qty = stock_qty + ?, cost_price = ?,"
+            " updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (line['qty'], cost_price, product_id))
+        db.execute(
+            "INSERT INTO restock_items (batch_id, product_id, qty_added, unit_price, unit_cost,"
+            " allocated_cost) VALUES (?, ?, ?, ?, ?, ?)",
+            (batch_id, product_id, line['qty'], line['unit_price'], line['unit_cost'],
+             line['line_cost']))
         db.execute("INSERT INTO stock_logs (product_id, change_qty, reason) VALUES (?, ?, ?)",
-                   (item['product_id'], qty_added, f'restock batch #{batch_id}'))
+                   (product_id, line['qty'], f'restock batch #{batch_id}'))
     db.commit()
-    return batch_id
+    return {'batch_id': batch_id, 'subtotal': subtotal, 'total_cost': total_cost}
 
 
 # --- Self use ---
@@ -292,6 +367,14 @@ def create_self_use(db, items):
 
 # --- Sales summary ---
 
+# A sale line only carries a cost if one had been recorded for the product when the order
+# was created -- stock that predates its first restock, or a product created without a cost
+# price, sells at unit_cost 0. Zero is "unknown", not "free", so every profit figure filters
+# on this rather than treating such a line as pure margin. Both the ranking and gross profit
+# use it, so the two always describe the same set of sales.
+_COSTED_LINE = "oi.unit_cost > 0"
+
+
 def sales_summary(db, unit, offset, tz, now=None):
     """Revenue/orders/items/restock-cost/profit for the window. Raises on bad unit.
 
@@ -312,10 +395,23 @@ def sales_summary(db, unit, offset, tz, now=None):
         FROM orders o
         WHERE o.status = 'completed'
     """ + date_filter, params).fetchone()
-    items = db.execute("""
+    # Gross profit is built from the line columns, not from total_revenue above: COGS only
+    # exists per line, and orders.total_amount is a separately stored figure that can
+    # disagree with the sum of its lines, which would make the two halves of the
+    # subtraction describe different money.
+    #
+    # Both halves cover only lines whose cost is known (see _COSTED_LINE). Counting an
+    # uncosted line's revenue against no cost at all would report it as pure profit and
+    # overstate the figure, while the profit ranking beside it leaves the same sale out --
+    # two numbers describing different sets of sales. `uncosted_sales` is how many lines
+    # were held back, so a caller can say so rather than quietly differing.
+    items = db.execute(f"""
         SELECT
             COUNT(DISTINCT oi.product_id) as unique_skus,
-            COALESCE(SUM(oi.quantity), 0) as total_items_sold
+            COALESCE(SUM(oi.quantity), 0) as total_items_sold,
+            COALESCE(SUM(CASE WHEN {_COSTED_LINE} THEN oi.subtotal END), 0) as line_revenue,
+            COALESCE(SUM(CASE WHEN {_COSTED_LINE} THEN oi.quantity * oi.unit_cost END), 0) as cogs,
+            COUNT(CASE WHEN NOT ({_COSTED_LINE}) THEN 1 END) as uncosted_sales
         FROM orders o
         JOIN order_items oi ON o.id = oi.order_id
         WHERE o.status = 'completed'
@@ -339,6 +435,13 @@ def sales_summary(db, unit, offset, tz, now=None):
         'total_items_sold': items['total_items_sold'],
         'restock_cost': restock_cost,
         'self_use_value': self_use_value,
+        'cogs': items['cogs'],
+        # What the goods sold in this window actually cost, as opposed to net_profit's
+        # cash view of the same period. The two answer different questions and both are
+        # reported: a month of heavy restocking shows a thin net profit and a healthy
+        # gross one, and neither figure is wrong.
+        'gross_profit': items['line_revenue'] - items['cogs'],
+        'uncosted_sales': items['uncosted_sales'],
         # Self use sits alongside profit, never inside it: the goods were already
         # paid for as restock spend, so deducting their retail value here would
         # double-count. Keep this expression as-is.
@@ -350,52 +453,81 @@ def sales_summary(db, unit, offset, tz, now=None):
 
 # --- Product performance (shared by the sales page and the monthly report) ---
 
-# Sold quantity and revenue per product over a window. Revenue per product has to
+# Sold quantity, revenue and cost per product over a window. Revenue per product has to
 # come from order_items.subtotal: orders.total_amount is a separately stored figure
-# for the whole order and cannot be attributed to a line.
+# for the whole order and cannot be attributed to a line. Cost comes from the unit_cost
+# snapshotted on each line, so re-running a past window gives the same answer even after
+# the product has been restocked at a new price.
 _SOLD_PER_PRODUCT = """
     SELECT p.id, p.name, p.sku,
            SUM(oi.quantity) AS total_sold,
-           SUM(oi.subtotal) AS total_revenue
+           SUM(oi.subtotal) AS total_revenue,
+           SUM(oi.quantity * oi.unit_cost) AS total_cost,
+           SUM(oi.subtotal) - SUM(oi.quantity * oi.unit_cost) AS total_profit
     FROM order_items oi
     JOIN orders o ON oi.order_id = o.id
     JOIN products p ON oi.product_id = p.id
     WHERE o.status = 'completed'
 """
 
-
-def _sold_per_product(db, start, end, order_by, limit):
+def _sold_per_product(db, start, end, order_by, limit, costed_only=False):
     date_filter, params = build_date_filter(start, end, 'o.created_at')
+    query = _SOLD_PER_PRODUCT + (f" AND {_COSTED_LINE}" if costed_only else '')
     rows = db.execute(
-        _SOLD_PER_PRODUCT + date_filter + f" GROUP BY p.id ORDER BY {order_by} LIMIT ?",
+        query + date_filter + f" GROUP BY p.id ORDER BY {order_by} LIMIT ?",
         params + (limit,)).fetchall()
     return [dict(r) for r in rows]
 
 
 def top_products_by_quantity(db, start, end, limit=3):
-    """Best sellers by units moved."""
+    """Best sellers by units moved. Every completed line counts, costed or not."""
     return _sold_per_product(db, start, end, 'total_sold DESC', limit)
 
 
-def top_products_by_value(db, start, end, limit=3):
-    """Best sellers by revenue, each with its `share` of the window's sales value.
+def top_products_by_profit(db, start, end, limit=3):
+    """Best earners by gross profit, each with its `margin` and `share` of window profit.
 
-    Share is a percentage of the summed line subtotals, NOT of sales_summary's
-    total_revenue: that comes from orders.total_amount, a separately stored value
-    that can disagree with the sum of its lines, so dividing by it would produce
-    shares that never total 100.
+    Ranked on money kept rather than money taken: revenue alone promotes whatever is
+    cheap and moves in volume, which is not the same thing as what pays for the shop.
+
+    Only lines whose cost is known take part (_COSTED_LINE), so every figure in a row --
+    revenue, cost, profit, margin -- describes the same sales. An uncosted line left in
+    would report as pure profit and outrank everything real; excluded per line rather than
+    per product, a product sold both before and after its first restock still ranks on the
+    part that has a cost. Pair with sales_missing_cost() to say what was held back.
+
+    Share is a percentage of the window's profit over those same costed lines, NOT of
+    sales_summary's gross_profit, so the shares of a full ranking total 100. A window that
+    lost money has no meaningful shares and reports 0.
     """
-    rows = _sold_per_product(db, start, end, 'total_revenue DESC', limit)
+    rows = _sold_per_product(db, start, end, 'total_profit DESC', limit, costed_only=True)
     date_filter, params = build_date_filter(start, end, 'o.created_at')
-    total = db.execute("""
-        SELECT COALESCE(SUM(oi.subtotal), 0) AS total
+    total = db.execute(f"""
+        SELECT COALESCE(SUM(oi.subtotal) - SUM(oi.quantity * oi.unit_cost), 0) AS total
         FROM order_items oi
         JOIN orders o ON oi.order_id = o.id
-        WHERE o.status = 'completed'
+        WHERE o.status = 'completed' AND {_COSTED_LINE}
     """ + date_filter, params).fetchone()['total']
     for row in rows:
-        row['share'] = (row['total_revenue'] / total * 100) if total else 0.0
+        row['margin'] = (row['total_profit'] / row['total_revenue'] * 100) if row['total_revenue'] else 0.0
+        row['share'] = (row['total_profit'] / total * 100) if total > 0 else 0.0
     return rows
+
+
+def sales_missing_cost(db, start, end):
+    """How many completed sale lines the profit figures had to leave out for want of a cost.
+
+    Same number for the ranking and for gross profit, since both apply _COSTED_LINE.
+    Without it the panel silently omits sales, which reads as a bug rather than as the
+    missing restock data it actually is.
+    """
+    date_filter, params = build_date_filter(start, end, 'o.created_at')
+    return db.execute(f"""
+        SELECT COUNT(*) AS n
+        FROM order_items oi
+        JOIN orders o ON oi.order_id = o.id
+        WHERE o.status = 'completed' AND NOT ({_COSTED_LINE})
+    """ + date_filter, params).fetchone()['n']
 
 
 def products_without_sales(db, start, end):

@@ -67,6 +67,13 @@
         </div>
     </div>
     <div class="stat-card">
+        <div class="stat-icon">&#128200;</div>
+        <div class="stat-info">
+            <div class="stat-value" id="stat-gross-profit">Rp 0</div>
+            <div class="stat-label">{{ t('Gross Profit') }}</div>
+        </div>
+    </div>
+    <div class="stat-card">
         <div class="stat-icon">&#127970;</div>
         <div class="stat-info">
             <div class="stat-value" id="stat-product-value">Rp 0</div>
@@ -102,15 +109,16 @@
         </table>
     </div>
     <div class="card">
-        <h3>{{ t('Top 3 by Sales Value') }}</h3>
+        <h3>{{ t('Top 3 by Profit') }}</h3>
         <table class="data-table">
             <thead>
-                <tr><th>{{ t('Product') }}</th><th>{{ t('SKU') }}</th><th>{{ t('Revenue') }}</th><th>{{ t('Share') }}</th></tr>
+                <tr><th>{{ t('Product') }}</th><th>{{ t('SKU') }}</th><th>{{ t('Profit') }}</th><th>{{ t('Margin') }}</th><th>{{ t('Share') }}</th></tr>
             </thead>
-            <tbody id="value-sellers-body">
-                <tr><td colspan="4" class="empty-row">{{ t('No data yet') }}</td></tr>
+            <tbody id="profit-sellers-body">
+                <tr><td colspan="5" class="empty-row">{{ t('No data yet') }}</td></tr>
             </tbody>
         </table>
+        <p class="table-note" id="profit-sellers-note"></p>
     </div>
 </div>
 

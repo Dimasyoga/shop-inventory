@@ -324,6 +324,7 @@ def screen_summary(db, unit_code, offset, tz, t):
         t('Orders: {orders}   Items sold: {items}', orders=s['total_orders'], items=s['total_items_sold']),
         t('Restock cost: {amount}', amount=format_rupiah(s['restock_cost'])),
         t('Self use: {amount}', amount=format_rupiah(s['self_use_value'])),
+        _gross_profit_line(s, t),
         f"<b>{t('Net profit: {amount}', amount=format_rupiah(s['net_profit']))}</b>",
     ])
     unit_row = [btn(('· ' if c == unit_code else '') + t(UNIT_LABELS[c]), f's:{c}:0')
@@ -362,8 +363,20 @@ def report_caption(data, t):
           orders=s['total_orders'], items=s['total_items_sold']),
         t('Restock cost: {amount}', amount=format_rupiah(s['restock_cost'])),
         t('Self use: {amount}', amount=format_rupiah(s['self_use_value'])),
+        _gross_profit_line(s, t),
         f"<b>{t('Net profit: {amount}', amount=format_rupiah(s['net_profit']))}</b>",
     ])
+
+
+def _gross_profit_line(s, t):
+    """Gross profit, saying so when sales without a recorded cost were held back.
+
+    Silently omitting them would make the figure look like it covered every sale.
+    """
+    line = t('Gross profit: {amount}', amount=format_rupiah(s['gross_profit']))
+    if s['uncosted_sales']:
+        line += ' ' + t('({n} sale(s) excluded)', n=s['uncosted_sales'])
+    return line
 
 
 def _cart_lines(db, items):
@@ -416,14 +429,63 @@ def screen_flow_qty(db, flow, pid, t):
                     [btn(t('✏️ Custom'), f'{prefix}:qc'), btn(t('« Back'), f'{prefix}:p:0')])
 
 
+def _restock_invoice_lines(db, state, t):
+    """The picked products priced as the invoice prices them, then the batch charges.
+
+    Written out in full so the review screen can be checked against the paper invoice
+    before anything is saved.
+    """
+    lines = []
+    for pid, qty in state['items'].items():
+        p = db.execute("SELECT name FROM products WHERE id = ?", (pid,)).fetchone()
+        name = esc(p['name']) if p else f'#{pid}'
+        price = state['prices'].get(pid)
+        if price is None:
+            lines.append(t('• {name} ×{qty} — <i>price missing</i>', name=name, qty=qty))
+        else:
+            lines.append(f'• {name} ×{qty} @ {format_rupiah(price)} = {format_rupiah(price * qty)}')
+    subtotal = sum(state['prices'].get(pid, 0) * qty for pid, qty in state['items'].items())
+    total = subtotal - state['discount'] + state['shipping'] + state['admin_fee']
+    lines.append(t('Subtotal: {amount}', amount=format_rupiah(subtotal)))
+    if state['discount']:
+        lines.append(t('Discount: −{amount}', amount=format_rupiah(state['discount'])))
+    if state['shipping']:
+        lines.append(t('Shipping: +{amount}', amount=format_rupiah(state['shipping'])))
+    if state['admin_fee']:
+        lines.append(t('Admin fee: +{amount}', amount=format_rupiah(state['admin_fee'])))
+    lines.append(f"<b>{t('Total paid: {amount}', amount=format_rupiah(total))}</b>")
+    return lines
+
+
+# The three invoice-wide charges, in the order the bot asks for them. Each is optional,
+# so every prompt carries a Skip button.
+RESTOCK_CHARGES = ('discount', 'shipping', 'admin_fee')
+
+
+def restock_charge_prompt(charge, t):
+    # Built as literals inside t(...) rather than a module-level table: the i18n coverage
+    # test scans for exactly that shape, and a table would slip past it untranslated.
+    return {
+        'discount': t('Send the <b>discount</b> on this invoice, or tap Skip.'),
+        'shipping': t('Send the <b>shipping cost</b>, or tap Skip.'),
+        'admin_fee': t('Send the <b>bank admin fee</b>, or tap Skip.'),
+    }[charge]
+
+
+def next_restock_charge(state):
+    """The charge to ask for after the current one, or None when the review is due."""
+    current = state.get('await_charge')
+    if current is None:
+        return RESTOCK_CHARGES[0]
+    position = RESTOCK_CHARGES.index(current) + 1
+    return RESTOCK_CHARGES[position] if position < len(RESTOCK_CHARGES) else None
+
+
 def screen_flow_review(db, flow, state, t):
     prefix = FLOW_PREFIX[flow]
     if flow == 'restock':
         title = t('📥 Restock — review')
-        lines = [f'<b>{title}</b>'] + _cart_lines(db, state['items'])
-        cost = state.get('cost')
-        cost_str = format_rupiah(cost) if cost is not None else '—'
-        lines.append(t('Total cost: <b>{cost}</b>', cost=cost_str))
+        lines = [f'<b>{title}</b>'] + _restock_invoice_lines(db, state, t)
         action = btn(t('✅ Save restock'), 'r:!')
     else:
         # Order and self use both value the cart at the current retail price;
@@ -458,6 +520,32 @@ def parse_qty(text):
         return None
     n = int(cleaned)
     return n if n > 0 else None
+
+
+def _ask_unit_price(db, pid, t):
+    """Prompt for one product's invoice price. Its own cost is offered as a hint, since a
+    repeat order is usually at the same price."""
+    p = db.execute("SELECT name, cost_price FROM products WHERE id = ?", (pid,)).fetchone()
+    name = esc(p['name']) if p else f'#{pid}'
+    text = t('Send the <b>price per unit</b> of {name} from the invoice, e.g. <code>12000</code>',
+             name=name)
+    if p and p['cost_price']:
+        text += '\n' + t('Last known: {amount}', amount=format_rupiah(p['cost_price']))
+    return text
+
+
+def _advance_restock_charge(api, db, chat_id, state, states, t):
+    """Move to the next invoice charge, or to the review screen once they are all in."""
+    charge = next_restock_charge(state)
+    if charge is None:
+        state = dict(state, await_charge=None)
+        states.set(chat_id, state)
+        body, markup = screen_flow_review(db, 'restock', state, t)
+        api.send_message(chat_id, body, markup)
+        return
+    states.set(chat_id, dict(state, await_charge=charge))
+    api.send_message(chat_id, restock_charge_prompt(charge, t),
+                     kb([btn(t('Skip'), 'r:sk'), btn(t('✖ Abandon'), 'r:c')]))
 
 
 # --- Update handling ---
@@ -505,20 +593,43 @@ def _handle_text(api, db, chat_id, text, states, t):
             return
         items = dict(state['items'])
         items[pid] = items.get(pid, 0) + qty
-        state = dict(state, items=items, pending_pid=None, await_qty=False)
+        state = dict(state, items=items, await_qty=False)
+        if state['flow'] == 'restock':
+            # Restock keeps pending_pid: the invoice price for this product is the next
+            # thing asked for, and the prompt has to know which product it belongs to.
+            states.set(chat_id, dict(state, await_price=True))
+            api.send_message(chat_id, _ask_unit_price(db, pid, t))
+            return
+        state = dict(state, pending_pid=None)
         states.set(chat_id, state)
         body, markup = screen_flow_picker(db, state['flow'], items, 0, t)
         api.send_message(chat_id, body, markup)
         return
-    if state and state.get('await_cost'):
-        cost = parse_cost(text)
-        if cost is None:
-            api.send_message(chat_id, t("Couldn't read that amount. Send the total cost as a number, e.g. <code>150000</code>"))
+    if state and state.get('await_price'):
+        pid = state.get('pending_pid')
+        if pid is None:  # lost track of which product — bail to the menu
+            states.pop(chat_id)
+            body, markup = screen_main(t)
+            api.send_message(chat_id, body, markup)
             return
-        state = dict(state, cost=cost, await_cost=False)
+        price = parse_cost(text)
+        if price is None:
+            api.send_message(chat_id, t("Couldn't read that amount. Send the price per unit as a number, e.g. <code>12000</code>"))
+            return
+        prices = dict(state['prices'])
+        prices[pid] = price
+        state = dict(state, prices=prices, pending_pid=None, await_price=False)
         states.set(chat_id, state)
-        body, markup = screen_flow_review(db, 'restock', state, t)
+        body, markup = screen_flow_picker(db, state['flow'], state['items'], 0, t)
         api.send_message(chat_id, body, markup)
+        return
+    if state and state.get('await_charge'):
+        amount = parse_cost(text)
+        if amount is None:
+            api.send_message(chat_id, t("Couldn't read that amount. Send it as a number, e.g. <code>15000</code>, or tap Skip"))
+            return
+        state = dict(state, **{state['await_charge']: amount})
+        _advance_restock_charge(api, db, chat_id, state, states, t)
         return
     # any other text: reset and show the menu
     states.pop(chat_id)
@@ -626,7 +737,10 @@ def _handle_flow_callback(api, db, callback, parts, states, show, ack, t):
     if sub is None:  # flow entry: 'no', 'r' or 'su'
         state = {'flow': flow, 'items': {}, 'pending_pid': None, 'await_qty': False}
         if flow == 'restock':
-            state.update(await_cost=False, cost=None)
+            # prices holds the invoice price per product; the three charges apply to the
+            # whole invoice and default to nothing, which is the common case.
+            state.update(prices={}, await_price=False, await_charge=None,
+                         discount=0.0, shipping=0.0, admin_fee=0.0)
         states.set(chat_id, state)
         show(*screen_flow_picker(db, flow, {}, 0, t))
         ack()
@@ -645,12 +759,12 @@ def _handle_flow_callback(api, db, callback, parts, states, show, ack, t):
 
     try:
         if sub == 'p':
-            states.set(chat_id, dict(state, pending_pid=None, await_qty=False))
+            states.set(chat_id, dict(state, pending_pid=None, await_qty=False, await_price=False))
             show(*screen_flow_picker(db, flow, state['items'], int(parts[2]), t))
             ack()
         elif sub == 'i':
             pid = int(parts[2])
-            states.set(chat_id, dict(state, pending_pid=pid, await_qty=False))
+            states.set(chat_id, dict(state, pending_pid=pid, await_qty=False, await_price=False))
             show(*screen_flow_qty(db, flow, pid, t))
             ack()
         elif sub == 'q':
@@ -661,7 +775,14 @@ def _handle_flow_callback(api, db, callback, parts, states, show, ack, t):
                 return
             items = dict(state['items'])
             items[pid] = items.get(pid, 0) + int(parts[2])
-            states.set(chat_id, dict(state, items=items, pending_pid=None, await_qty=False))
+            state = dict(state, items=items, await_qty=False)
+            if flow == 'restock':
+                # pending_pid stays set: the invoice price for this product comes next.
+                states.set(chat_id, dict(state, await_price=True))
+                api.send_message(chat_id, _ask_unit_price(db, pid, t))
+                ack(t('Added'))
+                return
+            states.set(chat_id, dict(state, pending_pid=None))
             show(*screen_flow_picker(db, flow, items, 0, t))
             ack(t('Added'))
         elif sub == 'qc':  # user wants to type a custom quantity
@@ -680,10 +801,20 @@ def _handle_flow_callback(api, db, callback, parts, states, show, ack, t):
             if flow != 'restock':
                 show(*screen_flow_review(db, flow, state, t))
                 ack()
+            elif any(pid not in state['prices'] for pid in state['items']):
+                ack(t('Send the unit price for every product first'), alert=True)
             else:
-                states.set(chat_id, dict(state, await_cost=True))
-                api.send_message(chat_id, t('Send the <b>total cost</b> of this restock as a message, e.g. <code>150000</code>'))
+                # Products are priced; what is left is the discount, shipping and fee that
+                # apply to the invoice as a whole.
+                _advance_restock_charge(api, db, chat_id, dict(state, await_charge=None),
+                                        states, t)
                 ack()
+        elif sub == 'sk':  # skip the charge being asked for; it stays at 0
+            if not state.get('await_charge'):
+                ack()
+                return
+            _advance_restock_charge(api, db, chat_id, state, states, t)
+            ack(t('Skipped'))
         elif sub == '!':
             if flow == 'order':
                 items = [{'product_id': pid, 'quantity': qty} for pid, qty in state['items'].items()]
@@ -702,14 +833,17 @@ def _handle_flow_callback(api, db, callback, parts, states, show, ack, t):
                      kb([btn(t('« Menu'), 'm')]))
                 ack(t('Self use saved'))
             else:
-                if state.get('cost') is None:
-                    ack(t('Send the total cost first'), alert=True)
+                if any(pid not in state['prices'] for pid in state['items']):
+                    ack(t('Send the unit price for every product first'), alert=True)
                     return
-                items = [{'product_id': pid, 'qty': qty} for pid, qty in state['items'].items()]
-                batch_id = services.create_restock(db, items, state['cost'])
+                items = [{'product_id': pid, 'qty': qty, 'unit_price': state['prices'][pid]}
+                         for pid, qty in state['items'].items()]
+                result = services.create_restock(
+                    db, items, discount=state['discount'],
+                    shipping_cost=state['shipping'], admin_fee=state['admin_fee'])
                 states.pop(chat_id)
                 show(t('✅ Restock batch <b>#{id}</b> saved — {cost}',
-                       id=batch_id, cost=format_rupiah(state["cost"])),
+                       id=result['batch_id'], cost=format_rupiah(result['total_cost'])),
                      kb([btn(t('« Menu'), 'm')]))
                 ack(t('Restock saved'))
         else:

@@ -45,6 +45,16 @@
         </div>
     </div>
     <div class="stat-card">
+        <div class="stat-icon">📈</div>
+        <div class="stat-info">
+            <div class="stat-value">{{ gross_profit }}</div>
+            <div class="stat-label">{{ t('Gross Profit ({month})', month=month_label) }}</div>
+            {% if uncosted_sales %}
+            <div class="table-note">{{ t('{n} sale(s) excluded — cost not recorded yet', n=uncosted_sales) }}</div>
+            {% endif %}
+        </div>
+    </div>
+    <div class="stat-card">
         <div class="stat-icon">🏪</div>
         <div class="stat-info">
             <div class="stat-value">{{ total_product_value }}</div>

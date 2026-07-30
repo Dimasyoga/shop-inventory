@@ -15,7 +15,8 @@ A Flask-based shop inventory management system built with Python 3.14, SQLite, a
 - User authentication (default: `admin` / `admin123`, hashed at rest; change it in Settings)
 - Product catalog with SKU, pricing, and stock tracking
 - Order management with lifecycle: draft → confirmed → completed (or cancelled)
-- Batch-level restock system with cost allocation
+- Invoice-based restock: a price per product plus batch discount, shipping and bank
+  fee, allocated into a per-unit landed cost
 - Self-use tracking for stock the seller takes for themself (no revenue)
 - Sales dashboard with period-based analytics and trend charts
 - Monthly PDF audit report, archived on the server and pushed to Telegram (see below)
@@ -123,7 +124,7 @@ shop-inventory/
     ├── dashboard.html  # Overview with stats and alerts
     ├── products.html   # Product catalog with stock management
     ├── orders.html     # Order creation and lifecycle
-    ├── restock.html    # Batch restock with cost tracking
+    ├── restock.html    # Invoice restock with per-product cost
     ├── selfuse.html    # Seller's own consumption (stock out, no revenue)
     ├── sales.html      # Sales analytics dashboard
     └── settings.html   # Language, Telegram bot config + account management
@@ -149,7 +150,7 @@ pip install -r requirements.txt
 The database is created automatically on first run. `database.py` handles:
 - Creating all tables if they don't exist
 - Migrating new tables (`restock_batches`, `restock_items`, `self_use_batches`,
-  `self_use_items`) to existing databases
+  `self_use_items`) and new columns (per-product cost tracking) to existing databases
 - Seeding the first user (`admin` / `admin123`, or `SHOP_ADMIN_USERNAME` /
   `SHOP_ADMIN_PASSWORD` if set — only ever on an empty database)
 
@@ -165,12 +166,12 @@ The database is created automatically on first run. `database.py` handles:
 | Table | Purpose |
 |---|---|
 | `users` | Authentication (username, password) |
-| `products` | Product catalog (SKU, price, stock, threshold) |
+| `products` | Product catalog (SKU, sale price, cost price, stock, threshold) |
 | `stock_logs` | Stock adjustment audit trail |
 | `orders` | Order header (status, total) |
-| `order_items` | Order line items |
-| `restock_batches` | Restock batch header (total cost per batch) |
-| `restock_items` | Restock line items (product, qty, allocated cost) |
+| `order_items` | Order line items (price and cost snapshot per line) |
+| `restock_batches` | Restock batch header (invoice subtotal, discount, shipping, admin fee, total paid) |
+| `restock_items` | Restock line items (product, qty, invoice unit price, landed unit cost, line cost) |
 | `self_use_batches` | Self-use batch header (total retail value per batch) |
 | `self_use_items` | Self-use line items (product, qty, price snapshot, subtotal) |
 
@@ -193,7 +194,9 @@ The server starts at `http://localhost:5000`. Default login: **admin** / **admin
 
 #### Dashboard (`/`)
 - **Stats**: Total products, total orders, low stock count, this month's revenue
-- **Financials**: Net profit (revenue − restock cost), total product value (price × stock), restock cost, self use
+- **Financials**: Net profit (revenue − restock cost), gross profit (revenue − cost of
+  goods sold), total product value (price × stock), restock cost, self use
+- Gross Profit notes how many sales it had to leave out for want of a recorded cost
 - **Recent Orders**: Last 5 orders with status and amount
 - **Low Stock Alerts**: Products at or below reorder threshold
 
@@ -211,9 +214,14 @@ The server starts at `http://localhost:5000`. Default login: **admin** / **admin
 - Cancel orders (except completed ones)
 
 #### Restock (`/restock`)
-- Add multiple products per restock batch
-- Single total cost per batch, allocated proportionally by quantity
-- Expandable history: click a batch row to see product breakdown
+- One row per product on the supplier invoice: product, quantity, **price per unit**
+- **Discount**, **Shipping** and **Admin Fee** apply to the whole invoice; the running
+  total is shown while typing so it can be checked against the paper invoice
+- Those three charges are spread across the lines **in proportion to line value**, giving
+  each product a landed unit cost (see *Restock Cost Flow* below)
+- Each product's `cost_price` rolls forward as a **weighted average** of the stock on hand
+  and the incoming batch, so a supplier price rise does not revalue stock already paid for
+- Expandable history: click a batch row to see the per-unit costs and charge breakdown
 - Period filter: Today, This Week, This Month, All Time
 
 #### Self Use (`/self-use`)
@@ -230,13 +238,14 @@ The server starts at `http://localhost:5000`. Default login: **admin** / **admin
 
 #### Sales Dashboard (`/sales`)
 - Period selector: Today, This Week, This Month, This Year, All Time
-- **Summary stats**: Revenue, completed orders, unique SKUs, items sold, restock cost, net profit, product value, self use
+- **Summary stats**: Revenue, completed orders, unique SKUs, items sold, restock cost,
+  net profit, gross profit, product value, self use
 - **Trend chart**: Daily revenue line chart (Chart.js)
 - **Product performance**, three panels answering three different questions:
   - **Top 3 by Quantity** — what moves the most units
-  - **Top 3 by Sales Value** — what earns the most money, with each product's share
-    of the period's revenue. A cheap high-volume line can top the quantity table
-    while contributing little of the money, which is the point of having both
+  - **Top 3 by Profit** — what actually earns, ranked on revenue − cost of goods sold,
+    with each product's margin and its share of the period's profit. A product can lead
+    on revenue and keep almost none of it, which is the point of ranking on profit
   - **Products With No Sales** — active products that sold nothing in the period,
     most valuable idle stock first, with the total value tied up in them
 - **Monthly Report**: Pick a month, then **Download PDF** or **Send to Telegram**
@@ -246,11 +255,12 @@ The server starts at `http://localhost:5000`. Default login: **admin** / **admin
 A PDF for one calendar month, for audit:
 
 - **Page 1** — the month's sales performance: revenue, completed orders, unique
-  SKUs, items sold, restock cost, net profit, self use, current stock value, plus
-  top 3 by quantity and top 3 by sales value
+  SKUs, items sold, restock cost, net profit, cost of goods sold, gross profit, self
+  use, current stock value, plus top 3 by quantity and top 3 by profit
 - **Sales Records** — every completed order, one row per product sold, with unit
   price and subtotal
-- **Restock Records** — every batch, one row per product, with allocated cost
+- **Restock Records** — every batch, one row per product, with invoice unit price,
+  landed unit cost and line cost
 - **Self Use Records** — every batch, one row per product, at the recorded price
 - **Products With No Sales** — appendix listing every active product that sold
   nothing that month and the stock value sitting in it
@@ -259,10 +269,13 @@ Notes:
 
 - Month boundaries follow the **shop timezone** from Settings, not the browser's,
   so the archived file and the copy the bot sends always describe the same period
-- "Share" is a product's share of **revenue**, not of margin. Restock cost is
-  allocated per batch pro-rata by quantity, so there is no per-unit cost of goods to
-  compute a real contribution margin from — that would need per-unit cost tracking.
-  Shares are taken over the summed line subtotals, so they total 100%
+- "Share" is a product's share of the month's **profit**, taken over the sales whose cost
+  is known, so a full ranking totals 100%. Margin is that product's own profit over its
+  own revenue
+- **Net profit and gross profit answer different questions** and both are printed. Net
+  profit is cash-basis (revenue − restock spend in the month); gross profit costs only the
+  goods that actually sold. A month of heavy restocking shows a thin net profit and a
+  healthy gross one, and neither figure is wrong
 - The no-sales appendix is complete rather than capped, unlike the panel on the
   sales page, and paginates on its own for a large catalogue
 - Written to `SHOP_REPORT_DIR` (`/data/reports` in Docker) as
@@ -413,6 +426,12 @@ docker compose logs -f app
    - **Name** (required): Product display name
    - **SKU** (optional): Unique stock-keeping unit identifier
    - **Price** (required): Selling price in Rupiah
+   - **Cost Price**: What a unit costs you. Normally maintained by restocking, but
+     **required when Stock Qty is above 0** — opening stock is inventory you paid for, and
+     a sale snapshots its cost when the order is created, so stock entered without a cost
+     sells at an unknown cost permanently with no way to repair it afterwards. A product
+     created empty needs nothing here; its first restock records the cost. Also editable
+     later, to correct a mistyped invoice
    - **Stock Qty**: Initial inventory count
    - **Reorder Threshold**: Stock level that triggers low-stock alert
 3. Click **Save** → product appears in catalog
@@ -422,16 +441,20 @@ docker compose logs -f app
 ### Restocking Inventory
 
 1. Navigate to **Restock** page
-2. Click **+ Add Product** for each product to restock
-3. For each row: select product, enter quantity
-4. After all products are added, enter **Total Restock Cost** (one value for the entire batch)
+2. Click **+ Add Product** for each line on the supplier invoice
+3. For each row: select product, enter quantity and the **price per unit** as the invoice
+   lists it (the field prefills with the product's last known cost)
+4. Enter the **Discount**, **Shipping** and **Admin Fee** for the invoice as a whole; leave
+   any of them at 0 if the invoice has none. The running total should match what you paid
 5. Click **Submit Restock**
 6. The system:
-   - Creates a batch record with the total cost
-   - Allocates cost proportionally: `allocated_cost = (qty / total_qty) × total_cost`
-   - Updates each product's stock quantity
-   - Records one row per product in `restock_items`
-7. Restock cost appears in dashboard and sales dashboard, used for net profit calculation
+   - Records the batch: subtotal, the three charges, and the total paid
+   - Spreads the charges across the lines by line value, giving each a landed unit cost
+   - Updates each product's stock quantity and rolls its `cost_price` forward as a
+     weighted average of the stock on hand and this batch
+   - Records one row per product in `restock_items` with both prices
+7. Restock cost appears in dashboard and sales dashboard, used for net profit calculation;
+   the per-unit cost is what the profit ranking and gross profit are computed from
 8. History shows batches; click any row to expand and see product-level breakdown
 
 ### Recording Self Use
@@ -490,19 +513,59 @@ Completed ──[Cannot Cancel]──> (Final state)
 ### Restock Cost Flow
 
 ```
-Batch Restock (total: Rp 500,000)
-├── Product A: 10 units → allocated Rp 200,000
-├── Product B: 15 units → allocated Rp 300,000
-└── Product C:  5 units → allocated Rp 100,000
+Supplier invoice
+├── Kopi  10 × Rp 12,000 = Rp 120,000   (75% of value)
+└── Gula   5 × Rp  8,000 = Rp  40,000   (25% of value)
+    Subtotal                Rp 160,000
+    Discount               −Rp  20,000
+    Shipping               +Rp  15,000
+    Admin fee              +Rp   2,500
+    Total paid              Rp 157,500
 
-Net Profit = Revenue − Restock Cost (from restock_batches)
+Charges net to −Rp 2,500, split by line value:
+├── Kopi: 120,000 − 1,875 = Rp 118,125 → Rp 11,812.50/unit
+└── Gula:  40,000 −   625 = Rp  39,375 → Rp  7,875.00/unit
+
+cost_price rolls forward as a weighted average:
+  4 in stock @ 10,000 + 6 restocked @ 15,000 → (40,000 + 90,000) / 10 = 13,000/unit
+
+Order lines snapshot unit_cost at creation, so a later restock never rewrites the
+margin of a sale already made.
+
+Net Profit   = Revenue − Restock spend in the window (cash basis)
+Gross Profit = Revenue − Σ(quantity × unit_cost), over costed sales only
 ```
+
+### Sales whose cost is unknown
+
+A sale line carries a cost only if one had been recorded for the product when the order was
+created. `unit_cost = 0` means **unknown, not free** — so a line with no cost is left out of
+**both** the profit ranking and Gross Profit/COGS, rather than being counted as pure margin
+in one and omitted from the other. Revenue and the quantity ranking are unaffected: units
+moved and money taken are facts regardless of what they cost.
+
+The exclusion is **per line**, not per product, so a product sold both before and after its
+first restock still ranks on the part of its history that has a cost. Every surface that
+shows a profit figure also reports how many sales were held back — the sales page, the
+dashboard card, the bot summary and the PDF — so a missing product reads as missing data
+rather than as a bug.
+
+This is why **Cost Price is required when a product is created with opening stock**: without
+it, every sale from that stock is permanently uncosted and invisible to the profit figures.
+
+> **Upgrading an existing database:** the old data recorded one total per batch, split
+> across the lines by quantity — so in a mixed batch a Rp 5,000 item and a Rp 30,000 item
+> came out at the same cost. That figure is not a usable per-product cost, so `cost_price`
+> is seeded **only** from batches that restocked a single product, where the batch total
+> genuinely is that product's cost. Everything else starts at 0 = unknown: those products
+> are left out of the profit ranking (which says how many) until their next restock, or
+> until you set a cost on the product form.
 
 ### Stock Movements at a Glance
 
 | Action | Stock | Money recorded | In net profit? |
 |---|---|---|---|
 | Order completed | ↓ | Revenue (`orders.total_amount`) | Yes, as revenue |
-| Restock | ↑ | Cost (`restock_batches.total_cost`) | Yes, subtracted |
+| Restock | ↑ | Total paid (`restock_batches.total_cost`) | Yes, subtracted |
 | Self use | ↓ | Retail value (`self_use_batches.total_value`) | **No** — reported separately |
 | Stock adjust | ↕ | none | No |

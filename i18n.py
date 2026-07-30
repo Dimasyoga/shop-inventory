@@ -78,6 +78,7 @@ TRANSLATIONS = {
         'Low Stock': 'Stok Menipis',
         'Revenue ({month})': 'Pendapatan ({month})',
         'Net Profit ({month})': 'Laba Bersih ({month})',
+        'Gross Profit ({month})': 'Laba Kotor ({month})',
         'Total Product Sale Value': 'Total Nilai Jual Produk',
         'Restock Cost ({month})': 'Biaya Restok ({month})',
         'Self Use ({month})': 'Pemakaian Sendiri ({month})',
@@ -95,6 +96,13 @@ TRANSLATIONS = {
         'Add Product': 'Tambah Produk',
         'Edit Product': 'Edit Produk',
         'Price (Rp) *': 'Harga (Rp) *',
+        'Cost Price': 'Harga Pokok',
+        'Cost Price (Rp)': 'Harga Pokok (Rp)',
+        'Cost Price (Rp) *': 'Harga Pokok (Rp) *',
+        'Kept up to date by restocking; set it here for stock you already had.':
+            'Diperbarui otomatis saat restok; isi di sini untuk stok yang sudah Anda miliki.',
+        'What you paid per unit for this opening stock.':
+            'Harga yang Anda bayar per unit untuk stok awal ini.',
         'Stock Qty': 'Jumlah Stok',
         "Stock is managed via orders and the Restock page and can't be edited here.":
             'Stok dikelola melalui pesanan dan halaman Restok, dan tidak dapat diubah di sini.',
@@ -132,8 +140,13 @@ TRANSLATIONS = {
         'New Restock': 'Restok Baru',
         'Quantity': 'Jumlah',
         '+ Add Product': '+ Tambah Produk',
-        'Total Restock Cost': 'Total Biaya Restok',
-        'Total cost for this batch': 'Total biaya untuk batch ini',
+        'Enter the supplier invoice: the price per unit of each product, then any discount, shipping and bank fee that apply to the whole invoice.':
+            'Masukkan invoice pemasok: harga per unit setiap produk, lalu diskon, ongkos kirim, dan biaya bank yang berlaku untuk seluruh invoice.',
+        'Price per unit': 'Harga per unit',
+        'Discount': 'Diskon',
+        'Shipping': 'Ongkos Kirim',
+        'Admin Fee': 'Biaya Admin',
+        'Invoice Total': 'Total Invoice',
         'Submit Restock': 'Kirim Restok',
         'Restock History': 'Riwayat Restok',
         'All Time': 'Sepanjang Waktu',
@@ -170,11 +183,18 @@ TRANSLATIONS = {
         'Total Items Sold': 'Total Item Terjual',
         'Restock Cost': 'Biaya Restok',
         'Net Profit': 'Laba Bersih',
+        'Gross Profit': 'Laba Kotor',
         'Sales Trend': 'Tren Penjualan',
         'Top 3 by Quantity': '3 Terlaris (Jumlah)',
-        'Top 3 by Sales Value': '3 Terlaris (Nilai)',
+        'Top 3 by Profit': '3 Teratas (Laba)',
         'Qty Sold': 'Jml Terjual',
+        'Profit': 'Laba',
+        'Margin': 'Margin',
         'Share': 'Kontribusi',
+        '{n} sale(s) excluded from Profit and Gross Profit — cost not recorded yet':
+            '{n} penjualan tidak dihitung dalam Laba dan Laba Kotor — biaya belum dicatat',
+        '{n} sale(s) excluded — cost not recorded yet':
+            '{n} penjualan tidak dihitung — biaya belum dicatat',
         'Products With No Sales': 'Produk Tanpa Penjualan',
         'Stock Value': 'Nilai Stok',
         'All products sold at least once': 'Semua produk terjual setidaknya sekali',
@@ -190,21 +210,27 @@ TRANSLATIONS = {
         'Metric': 'Metrik',
         'Value': 'Nilai',
         'Stock Value (today)': 'Nilai Stok (hari ini)',
+        'Cost of Goods Sold': 'Harga Pokok Penjualan',
         'Net profit is revenue minus restock cost. Self use is reported separately and never subtracted: those goods were already paid for as restock spend.':
             'Laba bersih adalah pendapatan dikurangi biaya restok. Pemakaian sendiri dilaporkan terpisah dan tidak pernah dikurangkan: barangnya sudah dibayar sebagai biaya restok.',
+        'Gross profit is revenue minus what the goods sold this month cost, so it ignores stock bought but not yet sold. A month of heavy restocking shows a thin net profit and a healthy gross one. Sales whose cost was never recorded are left out of both it and cost of goods sold.':
+            'Laba kotor adalah pendapatan dikurangi biaya barang yang terjual bulan ini, jadi stok yang dibeli tapi belum terjual tidak dihitung. Bulan dengan banyak restok menunjukkan laba bersih tipis dan laba kotor sehat. Penjualan yang biayanya belum pernah dicatat tidak dihitung, baik di laba kotor maupun di harga pokok penjualan.',
+        '{n} sale(s) are excluded from Gross Profit and from this ranking because no cost was recorded for the product when the order was created.':
+            '{n} penjualan tidak dihitung dalam Laba Kotor maupun peringkat ini karena tidak ada biaya yang tercatat untuk produknya saat pesanan dibuat.',
         'Sales Records': 'Catatan Penjualan',
         'One row per product sold. Only completed orders are included: drafts, confirmed-but-unpaid and cancelled orders never move stock or revenue.':
             'Satu baris per produk terjual. Hanya pesanan selesai yang disertakan: pesanan draf, terkonfirmasi tapi belum dibayar, dan dibatalkan tidak pernah memengaruhi stok atau pendapatan.',
         'Restock Records': 'Catatan Restok',
-        'One row per product restocked. Cost is allocated across a batch in proportion to quantity, so a line cost is a share of the batch total, not a supplier price.':
-            'Satu baris per produk direstok. Biaya dialokasikan dalam satu batch sebanding dengan kuantitas, jadi biaya per baris adalah bagian dari total batch, bukan harga pemasok.',
+        'One row per product restocked. Unit price is what the supplier invoice listed; unit cost adds that line’s share of the invoice discount, shipping and bank fee, split in proportion to line value. Landed cost is unit cost times quantity, and the lines of a batch sum to what was paid.':
+            'Satu baris per produk direstok. Harga satuan adalah harga yang tertera di invoice pemasok; biaya satuan menambahkan bagian baris itu atas diskon, ongkos kirim, dan biaya bank invoice, dibagi sebanding dengan nilai baris. Biaya akhir adalah biaya satuan dikali kuantitas, dan baris-baris satu batch berjumlah sama dengan yang dibayarkan.',
         'Self Use Records': 'Catatan Pemakaian Sendiri',
         'One row per product taken by the seller, valued at the retail price at the time of entry. No revenue, and not deducted from net profit.':
             'Satu baris per produk yang diambil penjual, dinilai pada harga jual saat dicatat. Tidak ada pendapatan, dan tidak dikurangkan dari laba bersih.',
         'Order': 'Pesanan',
         'Unit Price': 'Harga Satuan',
         'Qty Added': 'Jml Ditambah',
-        'Allocated Cost': 'Biaya Dialokasikan',
+        'Unit Cost': 'Biaya Satuan',
+        'Landed Cost': 'Biaya Akhir',
         'No records for this month': 'Tidak ada catatan untuk bulan ini',
         'Active products with no completed sale this month, most valuable idle stock first. Stock value is the current price times the quantity on hand.':
             'Produk aktif tanpa penjualan selesai bulan ini, stok menganggur termahal lebih dulu. Nilai stok adalah harga saat ini dikali jumlah yang tersedia.',
@@ -302,6 +328,8 @@ TRANSLATIONS = {
         'Orders: {orders}   Items sold: {items}': 'Pesanan: {orders}   Item terjual: {items}',
         'Restock cost: {amount}': 'Biaya restok: {amount}',
         'Self use: {amount}': 'Pemakaian sendiri: {amount}',
+        'Gross profit: {amount}': 'Laba kotor: {amount}',
+        '({n} sale(s) excluded)': '({n} penjualan tidak dihitung)',
         'Net profit: {amount}': 'Laba bersih: {amount}',
         'Week of {date}': 'Minggu tanggal {date}',
         '🆕 New order — review': '🆕 Pesanan baru — tinjau',
@@ -317,7 +345,12 @@ TRANSLATIONS = {
         ' (stock: {n})': ' (stok: {n})',
         'Tap a number, or ✏️ Custom to type any amount.':
             'Ketuk angka, atau ✏️ Kustom untuk mengetik jumlah apa pun.',
-        'Total cost: <b>{cost}</b>': 'Total biaya: <b>{cost}</b>',
+        '• {name} ×{qty} — <i>price missing</i>': '• {name} ×{qty} — <i>harga belum diisi</i>',
+        'Subtotal: {amount}': 'Subtotal: {amount}',
+        'Discount: −{amount}': 'Diskon: −{amount}',
+        'Shipping: +{amount}': 'Ongkos kirim: +{amount}',
+        'Admin fee: +{amount}': 'Biaya admin: +{amount}',
+        'Total paid: {amount}': 'Total dibayar: {amount}',
         '✅ Create draft order': '✅ Buat pesanan draf',
         '✅ Save restock': '✅ Simpan restok',
         '✅ Save self use': '✅ Simpan pemakaian sendiri',
@@ -334,18 +367,30 @@ TRANSLATIONS = {
         'Not authorized': 'Tidak diizinkan',
         "Couldn't read that number. Send the quantity as a whole number, e.g. <code>12</code>":
             'Tidak dapat membaca angka itu. Kirim jumlah sebagai bilangan bulat, mis. <code>12</code>',
-        "Couldn't read that amount. Send the total cost as a number, e.g. <code>150000</code>":
-            'Tidak dapat membaca jumlah itu. Kirim total biaya sebagai angka, mis. <code>150000</code>',
+        "Couldn't read that amount. Send the price per unit as a number, e.g. <code>12000</code>":
+            'Tidak dapat membaca jumlah itu. Kirim harga per unit sebagai angka, mis. <code>12000</code>',
+        "Couldn't read that amount. Send it as a number, e.g. <code>15000</code>, or tap Skip":
+            'Tidak dapat membaca jumlah itu. Kirim sebagai angka, mis. <code>15000</code>, atau ketuk Lewati',
         'Send the <b>quantity</b> as a number, e.g. <code>12</code>':
             'Kirim <b>jumlah</b> sebagai angka, mis. <code>12</code>',
-        'Send the <b>total cost</b> of this restock as a message, e.g. <code>150000</code>':
-            'Kirim <b>total biaya</b> restok ini sebagai pesan, mis. <code>150000</code>',
+        'Send the <b>price per unit</b> of {name} from the invoice, e.g. <code>12000</code>':
+            'Kirim <b>harga per unit</b> {name} dari invoice, mis. <code>12000</code>',
+        'Last known: {amount}': 'Terakhir diketahui: {amount}',
+        'Send the <b>discount</b> on this invoice, or tap Skip.':
+            'Kirim <b>diskon</b> pada invoice ini, atau ketuk Lewati.',
+        'Send the <b>shipping cost</b>, or tap Skip.':
+            'Kirim <b>ongkos kirim</b>, atau ketuk Lewati.',
+        'Send the <b>bank admin fee</b>, or tap Skip.':
+            'Kirim <b>biaya admin bank</b>, atau ketuk Lewati.',
+        'Skip': 'Lewati',
+        'Skipped': 'Dilewati',
         'Abandoned': 'Dibatalkan',
         'Session expired — start again from the menu':
             'Sesi berakhir — mulai lagi dari menu',
         'Added': 'Ditambahkan',
         'Nothing selected yet': 'Belum ada yang dipilih',
-        'Send the total cost first': 'Kirim total biaya terlebih dahulu',
+        'Send the unit price for every product first':
+            'Kirim harga satuan untuk setiap produk terlebih dahulu',
         'Order created': 'Pesanan dibuat',
         'Restock saved': 'Restok tersimpan',
         'Self use saved': 'Pemakaian sendiri tersimpan',
@@ -366,6 +411,8 @@ TRANSLATIONS = {
             'Hanya pesanan yang dikonfirmasi yang dapat diselesaikan',
         'Cannot cancel completed orders': 'Tidak dapat membatalkan pesanan yang sudah selesai',
         'Order already cancelled': 'Pesanan sudah dibatalkan',
+        'Discount cannot exceed the invoice subtotal':
+            'Diskon tidak boleh melebihi subtotal invoice',
         'invalid unit': 'unit tidak valid',
 
         # --- Request validation / API errors (app.py); surfaced as toasts ---
@@ -377,6 +424,8 @@ TRANSLATIONS = {
         'Name required': 'Nama wajib diisi',
         'Price must be a number': 'Harga harus berupa angka',
         'Price must be 0 or more': 'Harga harus 0 atau lebih',
+        'Cost price must be a number': 'Harga pokok harus berupa angka',
+        'Cost price must be 0 or more': 'Harga pokok harus 0 atau lebih',
         'Reorder threshold must be a whole number':
             'Ambang pemesanan ulang harus berupa bilangan bulat',
         'Reorder threshold must be 0 or more': 'Ambang pemesanan ulang harus 0 atau lebih',
@@ -390,7 +439,11 @@ TRANSLATIONS = {
         'At least one item required': 'Minimal satu item wajib diisi',
         'Each item needs a product_id and a positive whole-number quantity':
             'Setiap item memerlukan product_id dan jumlah bilangan bulat positif',
-        'Total cost must be 0 or more': 'Total biaya harus 0 atau lebih',
+        'Unit price must be 0 or more': 'Harga satuan harus 0 atau lebih',
+        'Cost price is required for stock on hand':
+            'Harga pokok wajib diisi bila ada stok awal',
+        'Discount, shipping and admin fee must each be 0 or more':
+            'Diskon, ongkos kirim, dan biaya admin masing-masing harus 0 atau lebih',
         'Valid product and positive whole-number quantity required':
             'Produk yang valid dan jumlah bilangan bulat positif wajib diisi',
         'invalid period': 'periode tidak valid',

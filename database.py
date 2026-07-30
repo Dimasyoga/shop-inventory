@@ -133,6 +133,7 @@ def init_db():
             name TEXT NOT NULL,
             sku TEXT UNIQUE,
             price REAL NOT NULL DEFAULT 0,
+            cost_price REAL NOT NULL DEFAULT 0,
             stock_qty INTEGER NOT NULL DEFAULT 0,
             reorder_threshold INTEGER NOT NULL DEFAULT 0,
             is_archived INTEGER NOT NULL DEFAULT 0,
@@ -164,6 +165,7 @@ def init_db():
             product_id INTEGER NOT NULL,
             quantity INTEGER NOT NULL,
             unit_price REAL NOT NULL,
+            unit_cost REAL NOT NULL DEFAULT 0,
             subtotal REAL NOT NULL,
             FOREIGN KEY (order_id) REFERENCES orders(id),
             FOREIGN KEY (product_id) REFERENCES products(id)
@@ -176,6 +178,10 @@ def init_db():
 
         CREATE TABLE IF NOT EXISTS restock_batches (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            subtotal_cost REAL NOT NULL DEFAULT 0,
+            discount REAL NOT NULL DEFAULT 0,
+            shipping_cost REAL NOT NULL DEFAULT 0,
+            admin_fee REAL NOT NULL DEFAULT 0,
             total_cost REAL NOT NULL DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
@@ -185,6 +191,8 @@ def init_db():
             batch_id INTEGER NOT NULL,
             product_id INTEGER NOT NULL,
             qty_added INTEGER NOT NULL,
+            unit_price REAL NOT NULL DEFAULT 0,
+            unit_cost REAL NOT NULL DEFAULT 0,
             allocated_cost REAL NOT NULL DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (batch_id) REFERENCES restock_batches(id),
@@ -215,6 +223,10 @@ def init_db():
     if not c.fetchone():
         c.execute('''CREATE TABLE restock_batches (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            subtotal_cost REAL NOT NULL DEFAULT 0,
+            discount REAL NOT NULL DEFAULT 0,
+            shipping_cost REAL NOT NULL DEFAULT 0,
+            admin_fee REAL NOT NULL DEFAULT 0,
             total_cost REAL NOT NULL DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )''')
@@ -225,6 +237,8 @@ def init_db():
             batch_id INTEGER NOT NULL,
             product_id INTEGER NOT NULL,
             qty_added INTEGER NOT NULL,
+            unit_price REAL NOT NULL DEFAULT 0,
+            unit_cost REAL NOT NULL DEFAULT 0,
             allocated_cost REAL NOT NULL DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (batch_id) REFERENCES restock_batches(id),
@@ -285,6 +299,70 @@ def init_db():
     order_cols = [r[1] for r in c.execute("PRAGMA table_info(orders)").fetchall()]
     if 'alerted_status' not in order_cols:
         c.execute("ALTER TABLE orders ADD COLUMN alerted_status TEXT")
+
+    # Migrate: per-product cost, so profit margin becomes computable. Restock used to
+    # capture a single batch total and split it across lines in proportion to quantity,
+    # which cannot express a supplier invoice: every line carries its own price, while
+    # the discount voucher, shipping and bank admin fee apply to the invoice as a whole.
+    # These columns record the invoice as written and the landed unit cost it implies.
+    #
+    # Each block is guarded on its own table, and the backfills below run only in the
+    # same pass that adds the columns, so a re-run never overwrites captured data. They
+    # cascade -- restock lines seed products, which seed order lines -- so the order of
+    # the blocks matters.
+    restock_item_cols = [r[1] for r in c.execute("PRAGMA table_info(restock_items)").fetchall()]
+    if 'unit_cost' not in restock_item_cols:
+        c.execute("ALTER TABLE restock_items ADD COLUMN unit_price REAL NOT NULL DEFAULT 0")
+        c.execute("ALTER TABLE restock_items ADD COLUMN unit_cost REAL NOT NULL DEFAULT 0")
+        # The quantity split is the only cost history that exists, so it seeds both the
+        # landed cost and the invoice price we never got to record.
+        c.execute("UPDATE restock_items SET unit_cost = allocated_cost / qty_added,"
+                  " unit_price = allocated_cost / qty_added WHERE qty_added > 0")
+
+    batch_cols = [r[1] for r in c.execute("PRAGMA table_info(restock_batches)").fetchall()]
+    if 'subtotal_cost' not in batch_cols:
+        c.execute("ALTER TABLE restock_batches ADD COLUMN subtotal_cost REAL NOT NULL DEFAULT 0")
+        c.execute("ALTER TABLE restock_batches ADD COLUMN discount REAL NOT NULL DEFAULT 0")
+        c.execute("ALTER TABLE restock_batches ADD COLUMN shipping_cost REAL NOT NULL DEFAULT 0")
+        c.execute("ALTER TABLE restock_batches ADD COLUMN admin_fee REAL NOT NULL DEFAULT 0")
+        # No charge history exists, so the whole of an old batch total is goods.
+        # total_cost keeps its meaning -- money actually paid -- and stays untouched,
+        # which is what leaves sales_summary's restock_cost and net_profit unaffected.
+        c.execute("UPDATE restock_batches SET subtotal_cost = total_cost")
+
+    product_cols = [r[1] for r in c.execute("PRAGMA table_info(products)").fetchall()]
+    if 'cost_price' not in product_cols:
+        c.execute("ALTER TABLE products ADD COLUMN cost_price REAL NOT NULL DEFAULT 0")
+        # Seeded only from batches that restocked ONE product. The old quantity split
+        # divides a batch total evenly per unit, so in a mixed batch a Rp 5.000 item and a
+        # Rp 30.000 item come out at the same cost -- a figure that yields margins of
+        # several hundred percent and poisons the weighted average of the next restock.
+        # A single-line batch has nothing to split across, so its total genuinely is that
+        # product's cost. Everything else stays 0, meaning "unknown": the margin reports
+        # leave those products out and say so, and the next restock records the truth.
+        c.execute("""UPDATE products SET cost_price = COALESCE((
+                         SELECT ri.unit_cost FROM restock_items ri
+                         WHERE ri.product_id = products.id
+                           AND (SELECT COUNT(*) FROM restock_items sib
+                                WHERE sib.batch_id = ri.batch_id) = 1
+                         ORDER BY ri.id DESC LIMIT 1), 0)""")
+        seeded = c.execute("SELECT COUNT(*) FROM products WHERE cost_price > 0").fetchone()[0]
+        log.warning('seeded cost_price for %d product(s) from single-product restock batches; '
+                    'products still at 0 need a cost from their next restock or the product '
+                    'form before they appear in the profit ranking', seeded)
+
+    order_item_cols = [r[1] for r in c.execute("PRAGMA table_info(order_items)").fetchall()]
+    if 'unit_cost' not in order_item_cols:
+        c.execute("ALTER TABLE order_items ADD COLUMN unit_cost REAL NOT NULL DEFAULT 0")
+        # An estimate, and knowingly so: the cost at the time of each historical sale was
+        # never recorded. It inherits the restriction above, so a line only gets a cost
+        # when that cost was defensible in the first place.
+        c.execute("""UPDATE order_items SET unit_cost = COALESCE((
+                         SELECT p.cost_price FROM products p
+                         WHERE p.id = order_items.product_id), 0)""")
+        backfilled = c.execute("SELECT COUNT(*) FROM order_items WHERE unit_cost > 0").fetchone()[0]
+        log.warning('backfilled unit_cost on %d historical order line(s) from the seeded product '
+                    'cost; margins from before this upgrade are estimates', backfilled)
 
     # Seed the first user. Credentials come from the environment so a deployment
     # never has to ship with the documented default; changing them later has no

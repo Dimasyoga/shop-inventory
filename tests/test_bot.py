@@ -310,24 +310,50 @@ def test_abandon_clears_state(bot):
 
 # --- Restock flow ---
 
-def test_restock_flow_with_cost_text(bot):
+def test_restock_flow_prices_each_product_then_the_invoice_charges(bot):
+    api, drive = bot
+    pid = make_product(stock=5)
+    drive(cb_update("r"))
+    drive(cb_update(f"r:i:{pid}"))
+    drive(cb_update("r:q:10"))           # -> await the unit price for this product
+    assert "price per unit" in api.last_text()
+    drive(text_update("nonsense"))       # bad price -> re-prompt, stays in flow
+    assert "Couldn't read" in api.last_text()
+    drive(text_update("Rp 15.000"))      # Indonesian-formatted price
+    assert drive.states.get(CHAT)["prices"] == {pid: 15000}
+    drive(cb_update("r:d"))              # -> discount, then shipping, then admin fee
+    drive(text_update("Rp 20.000"))      # discount
+    drive(text_update("15000"))          # shipping
+    drive(cb_update("r:sk"))             # no bank fee -> review
+    assert "145.000" in api.last_text()  # 150000 - 20000 + 15000
+    drive(cb_update("r:!"))
+    assert db_one("SELECT stock_qty FROM products WHERE id=?", (pid,))["stock_qty"] == 15
+    batch = db_one("SELECT * FROM restock_batches")
+    assert (batch["subtotal_cost"], batch["discount"], batch["shipping_cost"],
+            batch["admin_fee"], batch["total_cost"]) == (150000, 20000, 15000, 0, 145000)
+    item = db_one("SELECT * FROM restock_items")
+    assert item["unit_price"] == 15000
+    assert item["unit_cost"] == 14500          # the charges land on the one line
+    assert item["allocated_cost"] == 145000
+    # Stock was empty of cost before, so the batch sets it outright rather than averaging.
+    assert db_one("SELECT cost_price FROM products WHERE id=?", (pid,))["cost_price"] == 14500
+    log = db_one("SELECT change_qty, reason FROM stock_logs WHERE product_id=?", (pid,))
+    assert log["change_qty"] == 10
+    assert log["reason"] == f"restock batch #{batch['id']}"
+
+
+def test_restock_refuses_to_save_before_every_product_is_priced(bot):
     api, drive = bot
     pid = make_product(stock=5)
     drive(cb_update("r"))
     drive(cb_update(f"r:i:{pid}"))
     drive(cb_update("r:q:10"))
-    drive(cb_update("r:d"))              # -> await cost text
-    drive(text_update("nonsense"))       # bad cost -> re-prompt, stays in flow
-    assert "Couldn't read" in api.last_text()
-    drive(text_update("Rp 150.000"))     # Indonesian-formatted cost
-    assert "150.000" in api.last_text()  # review shows parsed cost
+    drive(cb_update("r:p:0"))            # walk away from the price prompt, back to picker
+    drive(cb_update("r:d"))
+    alerts = [p for p in api.sent("answerCallbackQuery") if p["show_alert"]]
+    assert alerts and "unit price" in alerts[-1]["text"]
     drive(cb_update("r:!"))
-    assert db_one("SELECT stock_qty FROM products WHERE id=?", (pid,))["stock_qty"] == 15
-    batch = db_one("SELECT * FROM restock_batches")
-    assert batch["total_cost"] == 150000
-    log = db_one("SELECT change_qty, reason FROM stock_logs WHERE product_id=?", (pid,))
-    assert log["change_qty"] == 10
-    assert log["reason"] == f"restock batch #{batch['id']}"
+    assert db_one("SELECT COUNT(*) AS n FROM restock_batches")["n"] == 0
 
 
 # --- Self use flow ---

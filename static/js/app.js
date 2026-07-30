@@ -134,7 +134,7 @@ function loadProducts() {
     fetch(url).then(r => r.json()).then(products => {
         const tbody = document.getElementById('productsBody');
         if (!products.length) {
-            tbody.innerHTML = `<tr><td colspan="5" class="empty-row">${t('No products found')}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="6" class="empty-row">${t('No products found')}</td></tr>`;
             return;
         }
         tbody.innerHTML = products.map(p => `
@@ -142,6 +142,7 @@ function loadProducts() {
                 <td>${escapeHtml(p.sku || '-')}</td>
                 <td>${escapeHtml(p.name)}</td>
                 <td>${formatRupiah(p.price)}</td>
+                <td>${p.cost_price > 0 ? formatRupiah(p.cost_price) : '—'}</td>
                 <td>${p.stock_qty}</td>
                 <td class="action-cell">
                     <button class="btn-icon" onclick="editProduct(${p.id})" title="${t('Edit')}">✏️</button>
@@ -152,12 +153,28 @@ function loadProducts() {
     });
 }
 
+// Opening stock is inventory that was paid for, and a sale snapshots its cost at order
+// time -- so stock entered without a cost sells at an unknown cost permanently. The server
+// enforces this; marking the field here just says so before the form is submitted.
+function syncCostPriceRequirement() {
+    const stock = parseInt(document.getElementById('productStock').value) || 0;
+    const needed = stock > 0 && !document.getElementById('productStock').disabled;
+    const cost = document.getElementById('productCostPrice');
+    cost.required = needed;
+    document.getElementById('costPriceLabel').textContent =
+        needed ? t('Cost Price (Rp) *') : t('Cost Price (Rp)');
+    document.getElementById('costPriceHint').textContent = needed
+        ? t('What you paid per unit for this opening stock.')
+        : t('Kept up to date by restocking; set it here for stock you already had.');
+}
+
 function openProductModal(id = null) {
     document.getElementById('productForm').reset();
     document.getElementById('productId').value = '';
     document.getElementById('modalTitle').textContent = t('Add Product');
     document.getElementById('productStock').disabled = false;
     document.getElementById('stockWarning').style.display = 'none';
+    syncCostPriceRequirement();
     if (id) {
         fetchJson('/api/products').then(products => {
             const p = products.find(x => x.id === id);
@@ -166,11 +183,14 @@ function openProductModal(id = null) {
                 document.getElementById('productName').value = p.name;
                 document.getElementById('productSku').value = p.sku || '';
                 document.getElementById('productPrice').value = p.price;
+                document.getElementById('productCostPrice').value = p.cost_price;
                 document.getElementById('productStock').value = p.stock_qty;
                 document.getElementById('productStock').disabled = true;
                 document.getElementById('stockWarning').style.display = 'block';
                 document.getElementById('productThreshold').value = p.reorder_threshold;
                 document.getElementById('modalTitle').textContent = t('Edit Product');
+                // Stock is not editable here, so an existing product's cost is never forced.
+                syncCostPriceRequirement();
             }
         });
     }
@@ -187,6 +207,7 @@ function saveProduct(e) {
         name: document.getElementById('productName').value,
         sku: document.getElementById('productSku').value,
         price: parseFloat(document.getElementById('productPrice').value) || 0,
+        cost_price: parseFloat(document.getElementById('productCostPrice').value) || 0,
         reorder_threshold: parseInt(document.getElementById('productThreshold').value) || 0
     };
     if (!id) {
@@ -407,6 +428,7 @@ function loadSalesSummary() {
             document.getElementById('stat-items').textContent = d.total_items_sold;
             document.getElementById('stat-restock-cost').textContent = formatRupiah(d.restock_cost);
             document.getElementById('stat-net-profit').textContent = formatRupiah(d.net_profit);
+            document.getElementById('stat-gross-profit').textContent = formatRupiah(d.gross_profit);
             document.getElementById('stat-self-use').textContent = formatRupiah(d.self_use_value);
         });
     fetchJson('/api/sales/product-value')
@@ -462,10 +484,10 @@ function loadProductPerformance() {
     fetchJson('/api/sales/product-performance?' + buildSalesParams())
         .then(d => {
             const row = cells => `<tr>${cells.map(c => `<td>${c}</td>`).join('')}</tr>`;
-            const fill = (id, items, cells, empty) => {
+            const fill = (id, items, cells, empty, colspan = 4) => {
                 document.getElementById(id).innerHTML = items.length
                     ? items.map(p => row(cells(p))).join('')
-                    : `<tr><td colspan="4" class="empty-row">${empty}</td></tr>`;
+                    : `<tr><td colspan="${colspan}" class="empty-row">${empty}</td></tr>`;
             };
             const name = p => escapeHtml(p.name);
             const sku = p => escapeHtml(p.sku || '-');
@@ -473,9 +495,16 @@ function loadProductPerformance() {
             fill('qty-sellers-body', d.by_quantity,
                  p => [name(p), sku(p), p.total_sold, formatRupiah(p.total_revenue)],
                  t('No data yet'));
-            fill('value-sellers-body', d.by_value,
-                 p => [name(p), sku(p), formatRupiah(p.total_revenue), formatPercent(p.share)],
-                 t('No data yet'));
+            fill('profit-sellers-body', d.by_profit,
+                 p => [name(p), sku(p), formatRupiah(p.total_profit),
+                       formatPercent(p.margin), formatPercent(p.share)],
+                 t('No data yet'), 5);
+            // A sale missing from the profit figures is missing a cost, not misbehaving.
+            // The same exclusion applies to Gross Profit above, so it is said once.
+            document.getElementById('profit-sellers-note').textContent = d.uncosted_sales
+                ? t('{n} sale(s) excluded from Profit and Gross Profit — cost not recorded yet',
+                    { n: d.uncosted_sales })
+                : '';
             fill('unsold-body', d.unsold.items,
                  p => [name(p), sku(p), p.stock_qty, formatRupiah(p.stock_value)],
                  t('All products sold at least once'));
@@ -601,40 +630,76 @@ function addRestockItem() {
     div.className = 'restock-item-row';
     div.innerHTML = `
         <div class="form-group">
-            <select id="restock-product-${idx}">
+            <select id="restock-product-${idx}" onchange="prefillRestockCost(this)">
                 <option value="">${t('Select product')}</option>
                 ${PRODUCTS.map(p => `<option value="${p.id}">${escapeHtml(p.name)} (${escapeHtml(p.sku || '-')}) - ${t('Stock: {n}', { n: p.stock })}</option>`).join('')}
             </select>
         </div>
         <div class="form-group">
-            <input type="number" id="restock-qty-${idx}" min="1" value="1" placeholder="${t('Qty')}">
+            <input type="number" id="restock-qty-${idx}" min="1" value="1" placeholder="${t('Qty')}" oninput="updateRestockTotals()">
         </div>
         <div class="form-group">
-            <button class="btn-remove-item" onclick="this.closest('.restock-item-row').remove();">&times;</button>
+            <input type="number" id="restock-price-${idx}" min="0" value="0" placeholder="${t('Price per unit')}" oninput="updateRestockTotals()">
+        </div>
+        <div class="form-group">
+            <button class="btn-remove-item" onclick="this.closest('.restock-item-row').remove(); updateRestockTotals();">&times;</button>
         </div>
     `;
     document.getElementById('restockItems').appendChild(div);
+    updateRestockTotals();
+}
+
+// Last known cost is the likeliest price for the next invoice, so it saves typing on a
+// repeat order. Only fills a field the user has not put a figure in.
+function prefillRestockCost(select) {
+    const priceInput = select.closest('.restock-item-row').querySelectorAll('input')[1];
+    const product = PRODUCTS.find(p => p.id === parseInt(select.value));
+    if (product && product.cost > 0 && !(parseFloat(priceInput.value) > 0)) {
+        priceInput.value = product.cost;
+    }
+    updateRestockTotals();
+}
+
+function readRestockForm() {
+    const items = [];
+    document.querySelectorAll('.restock-item-row').forEach(row => {
+        const inputs = row.querySelectorAll('input');
+        const pid = parseInt(row.querySelector('select').value);
+        const qty = parseInt(inputs[0].value) || 0;
+        const unitPrice = parseFloat(inputs[1].value) || 0;
+        if (pid && qty > 0) items.push({ product_id: pid, qty: qty, unit_price: unitPrice });
+    });
+    return {
+        items,
+        discount: parseFloat(document.getElementById('restockDiscountInput').value) || 0,
+        shipping_cost: parseFloat(document.getElementById('restockShippingInput').value) || 0,
+        admin_fee: parseFloat(document.getElementById('restockAdminFeeInput').value) || 0,
+    };
+}
+
+// Mirrors services.allocate_restock_costs: the total is what the invoice says was paid,
+// shown while typing so a mismatch with the paper invoice is caught before saving.
+function updateRestockTotals() {
+    const form = readRestockForm();
+    const subtotal = form.items.reduce((sum, i) => sum + i.qty * i.unit_price, 0);
+    const total = subtotal - form.discount + form.shipping_cost + form.admin_fee;
+    const parts = [`${t('Subtotal')}: ${formatRupiah(subtotal)}`];
+    if (form.discount) parts.push(`${t('Discount')}: −${formatRupiah(form.discount)}`);
+    if (form.shipping_cost) parts.push(`${t('Shipping')}: +${formatRupiah(form.shipping_cost)}`);
+    if (form.admin_fee) parts.push(`${t('Admin Fee')}: +${formatRupiah(form.admin_fee)}`);
+    document.getElementById('restockTotals').innerHTML =
+        `${parts.join(' &nbsp;·&nbsp; ')}<br><span class="restock-total-paid">${t('Invoice Total')}: ${formatRupiah(total)}</span>`;
 }
 
 function submitRestock() {
-    const rows = document.querySelectorAll('.restock-item-row');
-    const items = [];
-    rows.forEach(row => {
-        const select = row.querySelector('select');
-        const inputs = row.querySelectorAll('input');
-        const pid = parseInt(select.value);
-        const qty = parseInt(inputs[0].value) || 0;
-        if (pid && qty > 0) {
-            items.push({ product_id: pid, qty: qty });
-        }
-    });
-    if (!items.length) return showToast(t('Add at least one product'), 'error');
-    const batchCost = parseFloat(document.getElementById('restockTotalCostInput').value) || 0;
-    api('/api/restock', 'POST', { items, total_cost: batchCost }).then(d => {
+    const form = readRestockForm();
+    if (!form.items.length) return showToast(t('Add at least one product'), 'error');
+    api('/api/restock', 'POST', form).then(d => {
         if (d.success) {
             showToast(t('Restock saved! Total cost: {cost}', { cost: formatRupiah(d.total_cost) }));
             document.getElementById('restockItems').innerHTML = '';
-            document.getElementById('restockTotalCostInput').value = '0';
+            ['restockDiscountInput', 'restockShippingInput', 'restockAdminFeeInput']
+                .forEach(id => document.getElementById(id).value = '0');
             addRestockItem();
             loadRestockHistory();
         } else showToast(d.error, 'error');
@@ -650,7 +715,16 @@ function loadRestockHistory() {
                 return;
             }
             tbody.innerHTML = d.map(b => {
-                const productList = b.items.map(i => `${escapeHtml(i.product_name)} (${escapeHtml(i.product_sku || '-')}): +${i.qty_added}`).join('<br>');
+                const productList = b.items.map(i =>
+                    `${escapeHtml(i.product_name)} (${escapeHtml(i.product_sku || '-')}): +${i.qty_added} × ${formatRupiah(i.unit_cost)} = ${formatRupiah(i.allocated_cost)}`
+                ).join('<br>');
+                // The charge lines are what turn a listed price into the landed cost above,
+                // so the breakdown has to be readable back from the history.
+                const charges = [`${t('Subtotal')}: ${formatRupiah(b.subtotal_cost)}`];
+                if (b.discount) charges.push(`${t('Discount')}: −${formatRupiah(b.discount)}`);
+                if (b.shipping_cost) charges.push(`${t('Shipping')}: +${formatRupiah(b.shipping_cost)}`);
+                if (b.admin_fee) charges.push(`${t('Admin Fee')}: +${formatRupiah(b.admin_fee)}`);
+                const detail = `${productList}<br><span style="color:#888">${charges.join(' &nbsp;·&nbsp; ')}</span>`;
                 return `
                     <tr class="restock-batch-row" onclick="const d = this.nextElementSibling; d.style.display = d.style.display === 'none' ? '' : 'none'">
                         <td>${t('Batch #{id}', { id: b.id })}</td>
@@ -660,7 +734,7 @@ function loadRestockHistory() {
                     </tr>
                     <tr class="restock-detail-row" style="display:none">
                         <td colspan="4" style="background:#f8f9ff;padding:12px 16px;font-size:13px;color:#555">
-                            ${productList}
+                            ${detail}
                         </td>
                     </tr>
                 `;

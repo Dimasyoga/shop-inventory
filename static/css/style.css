@@ -230,6 +230,9 @@ select { padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-siz
     display: grid; grid-template-columns: 2fr 1fr auto;
     gap: 8px; margin-bottom: 8px; align-items: end;
 }
+/* Restock carries a unit price per line -- the invoice column that makes margin
+   computable -- so it is one column wider than self use. */
+.restock-header-row, .restock-item-row { grid-template-columns: 2fr 1fr 1fr auto; }
 .restock-item-row select, .restock-item-row input,
 .self-use-item-row select, .self-use-item-row input {
     padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px;
@@ -242,6 +245,15 @@ select { padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-siz
     background: #e74c3c; color: white; border: none; border-radius: 6px;
     padding: 8px 12px; cursor: pointer; font-size: 16px;
 }
+
+/* Restock invoice charges + running total */
+.restock-charges { display: flex; flex-wrap: wrap; gap: 16px; margin: 12px 0 4px; }
+.restock-totals {
+    margin: 8px 0 16px; font-size: 13px; color: #555; line-height: 1.7;
+}
+.restock-totals .restock-total-paid { font-weight: 700; color: #222; }
+.form-hint { font-size: 13px; color: #666; margin-bottom: 12px; }
+.table-note { font-size: 12px; color: #888; margin-top: 8px; }
 
 /* Restock / Self Use Batch Row (expandable) */
 .restock-batch-row, .self-use-batch-row { cursor: pointer; }

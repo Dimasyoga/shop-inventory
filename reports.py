@@ -98,16 +98,18 @@ def restock_batches(db, start, end):
     """Restock batches in the window, each with its line items."""
     date_filter, params = build_date_filter(start, end, 'rb.created_at')
     rows = db.execute("""
-        SELECT rb.id, rb.created_at, rb.total_cost,
-               ri.qty_added, ri.allocated_cost,
+        SELECT rb.id, rb.created_at, rb.subtotal_cost, rb.discount, rb.shipping_cost,
+               rb.admin_fee, rb.total_cost,
+               ri.qty_added, ri.unit_price, ri.unit_cost, ri.allocated_cost,
                p.name AS product_name, p.sku AS product_sku
         FROM restock_batches rb
         LEFT JOIN restock_items ri ON ri.batch_id = rb.id
         LEFT JOIN products p ON p.id = ri.product_id
         WHERE 1=1
     """ + date_filter + " ORDER BY rb.created_at, rb.id, ri.id", params).fetchall()
-    return _group(rows, ('id', 'created_at', 'total_cost'),
-                  ('qty_added', 'allocated_cost'))
+    return _group(rows, ('id', 'created_at', 'subtotal_cost', 'discount', 'shipping_cost',
+                         'admin_fee', 'total_cost'),
+                  ('qty_added', 'unit_price', 'unit_cost', 'allocated_cost'))
 
 
 def self_use_batches(db, start, end):
@@ -148,7 +150,8 @@ def collect(db, offset, tz, lang, now=None):
         # the shelves right now, not at month end, and is labelled as such.
         'stock_value': stock_value,
         'by_quantity': services.top_products_by_quantity(db, start, end),
-        'by_value': services.top_products_by_value(db, start, end),
+        'by_profit': services.top_products_by_profit(db, start, end),
+        'uncosted_sales': services.sales_missing_cost(db, start, end),
         # Unsliced: an audit document should account for every idle product, and the
         # section paginates on its own if the list is long.
         'unsold': services.products_without_sales(db, start, end),
@@ -271,6 +274,8 @@ def _summary_page(pdf, data, t):
         (t('Total Items Sold'), s['total_items_sold']),
         (t('Restock Cost'), format_rupiah(s['restock_cost'])),
         (t('Net Profit'), format_rupiah(s['net_profit'])),
+        (t('Cost of Goods Sold'), format_rupiah(s['cogs'])),
+        (t('Gross Profit'), format_rupiah(s['gross_profit'])),
         (t('Self Use'), format_rupiah(s['self_use_value'])),
         (t('Stock Value (today)'), format_rupiah(data['stock_value'])),
     ], widths=(58, 32), align=('LEFT', 'RIGHT'))
@@ -280,6 +285,10 @@ def _summary_page(pdf, data, t):
     # Single-line literal: tests/test_i18n_coverage.py scans line by line, so an
     # implicitly concatenated string would register a fragment as the key.
     pdf.multi_cell(0, 4.2, t('Net profit is revenue minus restock cost. Self use is reported separately and never subtracted: those goods were already paid for as restock spend.'))
+    # multi_cell leaves the cursor at the right margin, where a second full-width cell
+    # would have no room to render.
+    pdf.set_x(pdf.l_margin)
+    pdf.multi_cell(0, 4.2, t('Gross profit is revenue minus what the goods sold this month cost, so it ignores stock bought but not yet sold. A month of heavy restocking shows a thin net profit and a healthy gross one. Sales whose cost was never recorded are left out of both it and cost of goods sold.'))
     pdf.ln(6)
     pdf.set_text_color(0)
 
@@ -293,14 +302,22 @@ def _summary_page(pdf, data, t):
         for r in data['by_quantity']
     ], widths=seller_widths, align=seller_align, empty_text=t('No data yet'))
 
-    # Ranked by money rather than units, so a cheap high-volume line cannot hide
-    # which products actually carried the month.
-    _heading(pdf, t('Top 3 by Sales Value'), size=11)
-    _table(pdf, [t('Product'), t('SKU'), t('Revenue'), t('Share')], [
-        (r['name'], r['sku'] or '—', format_rupiah(r['total_revenue']),
-         format_percent(r['share'], lang))
-        for r in data['by_value']
-    ], widths=seller_widths, align=seller_align, empty_text=t('No data yet'))
+    # Ranked by money kept rather than money taken, so a cheap high-volume line cannot
+    # hide which products actually carried the month.
+    _heading(pdf, t('Top 3 by Profit'), size=11)
+    _table(pdf, [t('Product'), t('SKU'), t('Profit'), t('Margin'), t('Share')], [
+        (r['name'], r['sku'] or '—', format_rupiah(r['total_profit']),
+         format_percent(r['margin'], lang), format_percent(r['share'], lang))
+        for r in data['by_profit']
+    ], widths=(62, 30, 32, 20, 20),
+       align=('LEFT', 'LEFT', 'RIGHT', 'RIGHT', 'RIGHT'), empty_text=t('No data yet'))
+    if data['uncosted_sales']:
+        # An audit reader must not read the omission as the product having sold nothing.
+        pdf.set_font(FONT_NAME, '', 7.5)
+        pdf.set_text_color(120)
+        pdf.set_x(pdf.l_margin)
+        pdf.multi_cell(0, 4.2, t('{n} sale(s) are excluded from Gross Profit and from this ranking because no cost was recorded for the product when the order was created.', n=data['uncosted_sales']))
+        pdf.set_text_color(0)
 
 
 def _record_section(pdf, title, note, headings, widths, align, rows, total_row, empty_text):
@@ -343,15 +360,17 @@ def _restock_section(pdf, data, t):
     tz = data['tz']
     rows = [(b['id'], _local(b['created_at'], tz), it['product_name'] or '—',
              it['product_sku'] or '—', it['qty_added'],
+             format_rupiah(it['unit_price']), format_rupiah(it['unit_cost']),
              format_rupiah(it['allocated_cost']))
             for b in data['restocks'] for it in b['items']]
     cost = sum(b['total_cost'] for b in data['restocks'])
     _record_section(
         pdf, t('Restock Records'),
-        t('One row per product restocked. Cost is allocated across a batch in proportion to quantity, so a line cost is a share of the batch total, not a supplier price.'),
-        [t('Batch'), t('Date'), t('Product'), t('SKU'), t('Qty Added'), t('Allocated Cost')],
-        widths=(14, 27, 57, 30, 22, 31),
-        align=('RIGHT', 'LEFT', 'LEFT', 'LEFT', 'RIGHT', 'RIGHT'),
+        t('One row per product restocked. Unit price is what the supplier invoice listed; unit cost adds that line’s share of the invoice discount, shipping and bank fee, split in proportion to line value. Landed cost is unit cost times quantity, and the lines of a batch sum to what was paid.'),
+        [t('Batch'), t('Date'), t('Product'), t('SKU'), t('Qty Added'), t('Unit Price'),
+         t('Unit Cost'), t('Landed Cost')],
+        widths=(12, 24, 44, 24, 18, 24, 24, 26),
+        align=('RIGHT', 'LEFT', 'LEFT', 'LEFT', 'RIGHT', 'RIGHT', 'RIGHT', 'RIGHT'),
         rows=rows,
         total_row=t('Batches: {n} — total {amount}',
                     n=len(data['restocks']), amount=format_rupiah(cost)),

@@ -12,7 +12,7 @@
     </div>
     <table class="data-table" id="productsTable">
         <thead>
-            <tr><th>{{ t('SKU') }}</th><th>{{ t('Name') }}</th><th>{{ t('Sale Price') }}</th><th>{{ t('Stock') }}</th><th>{{ t('Actions') }}</th></tr>
+            <tr><th>{{ t('SKU') }}</th><th>{{ t('Name') }}</th><th>{{ t('Sale Price') }}</th><th>{{ t('Cost Price') }}</th><th>{{ t('Stock') }}</th><th>{{ t('Actions') }}</th></tr>
         </thead>
         <tbody id="productsBody">
         </tbody>
@@ -42,8 +42,13 @@
                     <input type="number" id="productPrice" required min="0" step="1">
                 </div>
                 <div class="form-group">
+                    <label id="costPriceLabel">{{ t('Cost Price (Rp)') }}</label>
+                    <input type="number" id="productCostPrice" min="0" step="1">
+                    <small class="field-warning" id="costPriceHint">{{ t('Kept up to date by restocking; set it here for stock you already had.') }}</small>
+                </div>
+                <div class="form-group">
                     <label>{{ t('Stock Qty') }}</label>
-                    <input type="number" id="productStock" min="0" value="0">
+                    <input type="number" id="productStock" min="0" value="0" oninput="syncCostPriceRequirement()">
                     <small class="field-warning" id="stockWarning">{{ t("Stock is managed via orders and the Restock page and can't be edited here.") }}</small>
                 </div>
                 <div class="form-group">

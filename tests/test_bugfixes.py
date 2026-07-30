@@ -111,8 +111,10 @@ def test_completion_decrements_stock_and_logs(client, product, order):
 
 def test_restock_increments_stock_and_logs(client, product):
     pid = product(stock=5)
-    res = client.post("/api/restock", json={"items": [{"product_id": pid, "qty": 7}], "total_cost": 10000})
+    res = client.post("/api/restock", json={
+        "items": [{"product_id": pid, "qty": 7, "unit_price": 1000}], "shipping_cost": 3000})
     assert res.status_code == 200
+    assert res.get_json()["total_cost"] == 10000
     assert stock_of(pid) == 12
     logs = stock_logs_for(pid)
     assert len(logs) == 1
@@ -276,11 +278,18 @@ def test_duplicate_sku_does_not_leak_schema(client):
     assert "UNIQUE constraint" not in res.get_json()["error"]
 
 
-def test_restock_rejects_garbage_qty_and_cost(client, product):
+def test_restock_rejects_garbage_qty_price_and_charges(client, product):
     pid = product(stock=5)
-    assert client.post("/api/restock", json={"items": [{"product_id": pid, "qty": "x"}], "total_cost": 1}).status_code == 400
-    assert client.post("/api/restock", json={"items": [{"product_id": pid, "qty": 1}], "total_cost": "x"}).status_code == 400
-    assert client.post("/api/restock", json={"items": [{"product_id": pid, "qty": 1}], "total_cost": -10}).status_code == 400
+    def post(items, **charges):
+        return client.post("/api/restock", json={"items": items, **charges}).status_code
+    assert post([{"product_id": pid, "qty": "x", "unit_price": 1000}]) == 400
+    assert post([{"product_id": pid, "qty": 1, "unit_price": "x"}]) == 400
+    assert post([{"product_id": pid, "qty": 1, "unit_price": -10}]) == 400
+    assert post([{"product_id": pid, "qty": 1, "unit_price": 1000}], discount="x") == 400
+    assert post([{"product_id": pid, "qty": 1, "unit_price": 1000}], shipping_cost=-10) == 400
+    assert post([{"product_id": pid, "qty": 1, "unit_price": 1000}], admin_fee=-1) == 400
+    # A discount larger than the goods would drive the line costs negative.
+    assert post([{"product_id": pid, "qty": 1, "unit_price": 1000}], discount=5000) == 400
     assert stock_of(pid) == 5
 
 

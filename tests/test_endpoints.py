@@ -285,6 +285,52 @@ def test_summary_reports_self_use_without_touching_net_profit(client, insert, pr
     assert api["net_profit"] == 30000  # 50000 - 20000, self use excluded
 
 
+def test_summary_reports_gross_profit_beside_the_cash_view(client, insert, product):
+    """The two profit figures answer different questions and both are reported: gross
+    profit costs what was sold, net profit counts what was spent."""
+    when = utc_now() - timedelta(seconds=5)
+    order = insert("orders", stamp(when), status="completed", total_amount=50000)
+    import database
+    conn = database.get_db()
+    conn.execute("INSERT INTO order_items (order_id, product_id, quantity, unit_price,"
+                 " unit_cost, subtotal) VALUES (?,?,?,?,?,?)",
+                 (order, product, 2, 25000, 15000, 50000))
+    conn.commit()
+    conn.close()
+    insert("restock_batches", stamp(when), subtotal_cost=90000, total_cost=90000)
+
+    api = client.get(f"/api/sales/summary?unit=year&offset=0&tz={JAKARTA}").get_json()
+    assert api["cogs"] == 30000
+    assert api["gross_profit"] == 20000     # 50000 - 2 x 15000
+    assert api["net_profit"] == -40000      # 50000 - 90000 of restock spend
+
+
+def test_gross_profit_leaves_out_sales_whose_cost_is_unknown(client, insert, product):
+    """An uncosted line has no cost to subtract, so counting its revenue would report it
+    as pure profit -- and the profit ranking beside it excludes the same sale. Both figures
+    describe the costed sales only, and the count says how many were held back."""
+    when = utc_now() - timedelta(seconds=5)
+    _completed_order(insert, when, 50000, product)       # no cost recorded
+    api = client.get(f"/api/sales/summary?unit=year&offset=0&tz={JAKARTA}").get_json()
+    assert api["total_revenue"] == 50000                 # revenue is still whole
+    assert api["cogs"] == 0
+    assert api["gross_profit"] == 0                      # not 50000
+    assert api["uncosted_sales"] == 1
+
+
+def test_products_created_with_stock_must_declare_a_cost(client):
+    """Opening stock was paid for, and a sale snapshots its cost at order time -- so stock
+    entered without one sells at an unknown cost with no way to repair it afterwards."""
+    res = client.post("/api/products", json={"name": "A", "price": 20000, "stock_qty": 10})
+    assert res.status_code == 400
+    assert "Cost price" in res.get_json()["error"]
+    # Starting empty is fine: the first restock records the cost.
+    assert client.post("/api/products",
+                       json={"name": "B", "price": 20000, "stock_qty": 0}).status_code == 200
+    assert client.post("/api/products", json={"name": "C", "price": 20000, "stock_qty": 10,
+                                              "cost_price": 12000}).status_code == 200
+
+
 def test_dashboard_shows_self_use_card(client, insert, product):
     jkt = ZoneInfo(JAKARTA)
     early_this_month = datetime.now(jkt).replace(

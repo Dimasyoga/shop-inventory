@@ -34,6 +34,15 @@ CREATE TABLE order_items (id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER
     subtotal REAL NOT NULL, FOREIGN KEY (order_id) REFERENCES orders(id),
     FOREIGN KEY (product_id) REFERENCES products(id));
 CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+-- Restock as it stood before per-product cost: one total per batch, split across the
+-- lines by quantity, with no invoice price, discount, shipping or fee recorded.
+CREATE TABLE restock_batches (id INTEGER PRIMARY KEY AUTOINCREMENT,
+    total_cost REAL NOT NULL DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE restock_items (id INTEGER PRIMARY KEY AUTOINCREMENT, batch_id INTEGER NOT NULL,
+    product_id INTEGER NOT NULL, qty_added INTEGER NOT NULL,
+    allocated_cost REAL NOT NULL DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (batch_id) REFERENCES restock_batches(id),
+    FOREIGN KEY (product_id) REFERENCES products(id));
 
 INSERT INTO categories (name) VALUES ('sabun'), ('susu');
 -- Non-contiguous ids on purpose: other tables reference these values, so the
@@ -46,6 +55,12 @@ INSERT INTO orders (id, status, total_amount) VALUES (3, 'completed', 50000);
 INSERT INTO order_items (order_id, product_id, quantity, unit_price, subtotal)
     VALUES (3, 7, 2, 25000, 50000);
 INSERT INTO stock_logs (product_id, change_qty, reason) VALUES (7, -2, 'sale order #3');
+-- Batch 1 mixes two products, so its per-unit split (40000/4 and 20000/2 -- identical,
+-- which is the flaw) says nothing about either one's real cost. Batch 2 restocked Kopi
+-- alone, so its total genuinely is Kopi's cost.
+INSERT INTO restock_batches (id, total_cost) VALUES (1, 60000), (2, 30000);
+INSERT INTO restock_items (batch_id, product_id, qty_added, allocated_cost)
+    VALUES (1, 7, 4, 40000), (1, 9, 2, 20000), (2, 7, 2, 30000);
 '''
 
 
@@ -83,8 +98,8 @@ def test_categories_table_is_gone(legacy_db):
 def test_category_id_column_is_gone(legacy_db):
     cols = {r["name"] for r in query(legacy_db, "PRAGMA table_info(products)")}
     assert "category_id" not in cols
-    assert cols == {"id", "name", "sku", "price", "stock_qty", "reorder_threshold",
-                    "is_archived", "created_at", "updated_at"}
+    assert cols == {"id", "name", "sku", "price", "cost_price", "stock_qty",
+                    "reorder_threshold", "is_archived", "created_at", "updated_at"}
 
 
 def test_the_rebuild_leaves_no_scratch_table_behind(legacy_db):
@@ -146,6 +161,68 @@ def test_migrating_twice_changes_nothing(legacy_db):
     database.init_db()
     assert query(legacy_db, "SELECT * FROM products ORDER BY id") == before
     assert query(legacy_db, "PRAGMA foreign_key_check") == []
+
+
+def test_restock_lines_get_a_unit_cost_from_the_old_quantity_split(legacy_db):
+    # The split is all the cost history there is, so it seeds both the landed cost and
+    # the invoice price that was never recorded.
+    rows = query(legacy_db, "SELECT batch_id, product_id, unit_price, unit_cost,"
+                            " allocated_cost FROM restock_items ORDER BY id")
+    assert rows == [
+        {"batch_id": 1, "product_id": 7, "unit_price": 10000.0, "unit_cost": 10000.0,
+         "allocated_cost": 40000.0},
+        {"batch_id": 1, "product_id": 9, "unit_price": 10000.0, "unit_cost": 10000.0,
+         "allocated_cost": 20000.0},
+        {"batch_id": 2, "product_id": 7, "unit_price": 15000.0, "unit_cost": 15000.0,
+         "allocated_cost": 30000.0},
+    ]
+
+
+def test_batch_totals_are_untouched_and_count_wholly_as_goods(legacy_db):
+    # total_cost still means money paid, which is what keeps net_profit unchanged by the
+    # upgrade; with no charge history, all of it was goods.
+    assert query(legacy_db, "SELECT id, subtotal_cost, discount, shipping_cost, admin_fee,"
+                            " total_cost FROM restock_batches ORDER BY id") == [
+        {"id": 1, "subtotal_cost": 60000.0, "discount": 0.0, "shipping_cost": 0.0,
+         "admin_fee": 0.0, "total_cost": 60000.0},
+        {"id": 2, "subtotal_cost": 30000.0, "discount": 0.0, "shipping_cost": 0.0,
+         "admin_fee": 0.0, "total_cost": 30000.0},
+    ]
+
+
+def test_only_single_product_batches_are_trusted_to_seed_a_cost(legacy_db):
+    # The old split divides a batch total evenly per unit, so a mixed batch would hand a
+    # cheap product the same cost as an expensive one -- margins in the hundreds of
+    # percent, and a poisoned weighted average on the next restock. Teh only ever appeared
+    # in the mixed batch, so it stays unknown.
+    assert query(legacy_db, "SELECT id, cost_price FROM products ORDER BY id") == [
+        {"id": 7, "cost_price": 15000.0},   # batch 2, Kopi alone: 30000 over 2 units
+        {"id": 9, "cost_price": 0.0},       # mixed batch only
+        {"id": 11, "cost_price": 0.0},      # never restocked
+    ]
+
+
+def test_historical_order_lines_inherit_only_a_defensible_cost(legacy_db):
+    # Knowingly an estimate -- what Kopi cost at the time of this sale was never recorded
+    # -- but it comes from the single-product batch, so it is at least the right order of
+    # magnitude. A line whose product has no trusted cost stays at 0 and is excluded.
+    assert query(legacy_db, "SELECT quantity, unit_price, unit_cost FROM order_items") == [
+        {"quantity": 2, "unit_price": 25000.0, "unit_cost": 15000.0},
+    ]
+
+
+def test_a_second_migration_does_not_overwrite_captured_costs(legacy_db):
+    # The backfills are one-shot: they run in the pass that adds the columns. A re-run
+    # that recomputed them would throw away every cost captured since.
+    conn = sqlite3.connect(legacy_db)
+    conn.execute("UPDATE products SET cost_price = 99 WHERE id = 7")
+    conn.execute("UPDATE order_items SET unit_cost = 42")
+    conn.commit()
+    conn.close()
+    database.init_db()
+    assert query(legacy_db, "SELECT cost_price FROM products WHERE id = 7") == [
+        {"cost_price": 99.0}]
+    assert query(legacy_db, "SELECT unit_cost FROM order_items") == [{"unit_cost": 42.0}]
 
 
 def test_a_fresh_database_never_creates_categories(db_path):

@@ -64,7 +64,8 @@ def _json_body():
 def _products_json(rows):
     """Plain dicts for embedding in templates via |tojson (sqlite3.Row isn't serializable)."""
     return [{'id': p['id'], 'name': p['name'], 'sku': p['sku'],
-             'price': p['price'], 'stock': p['stock_qty']} for p in rows]
+             'price': p['price'], 'cost': p['cost_price'], 'stock': p['stock_qty']}
+            for p in rows]
 
 def _validate_product(data):
     """Return (fields, error). fields excludes stock_qty; callers add it where allowed."""
@@ -78,6 +79,15 @@ def _validate_product(data):
         return None, 'Price must be a number'
     if not (price >= 0):  # also rejects NaN
         return None, 'Price must be 0 or more'
+    # Cost price is normally maintained by restocking. It is editable so that stock
+    # already on hand at install time can be costed, and so a mistyped invoice can be
+    # corrected -- the next restock averages onto whatever is set here.
+    try:
+        cost_price = float(data.get('cost_price', 0))
+    except (TypeError, ValueError):
+        return None, 'Cost price must be a number'
+    if not (cost_price >= 0):
+        return None, 'Cost price must be 0 or more'
     try:
         threshold = int(data.get('reorder_threshold', 0))
     except (TypeError, ValueError):
@@ -90,6 +100,7 @@ def _validate_product(data):
         'name': name,
         'sku': sku,
         'price': price,
+        'cost_price': cost_price,
         'reorder_threshold': threshold,
     }, None
 
@@ -208,6 +219,8 @@ def dashboard():
         month_label=month_label,
         month_revenue=format_rupiah(summary['total_revenue']),
         net_profit=format_rupiah(summary['net_profit']),
+        gross_profit=format_rupiah(summary['gross_profit']),
+        uncosted_sales=summary['uncosted_sales'],
         self_use_value=format_rupiah(summary['self_use_value']),
         total_product_value=format_rupiah(total_product_value),
         total_restock_cost_raw=summary['restock_cost'],
@@ -252,12 +265,18 @@ def api_create_product():
         return _err('Stock must be a whole number')
     if stock_qty < 0:
         return _err('Stock must be 0 or more')
+    # Opening stock is inventory that was paid for, and the cost of a sale is snapshotted
+    # when the order is created -- so a product that starts with stock and no cost sells
+    # those units at an unknown cost permanently, with no way to repair it afterwards.
+    # A product created empty needs nothing: its first restock records the cost.
+    if stock_qty > 0 and fields['cost_price'] <= 0:
+        return _err('Cost price is required for stock on hand')
     try:
         cur = g.db.execute("""
-            INSERT INTO products (name, sku, price, stock_qty, reorder_threshold)
-            VALUES (?, ?, ?, ?, ?)
-        """, (fields['name'], fields['sku'], fields['price'], stock_qty,
-              fields['reorder_threshold']))
+            INSERT INTO products (name, sku, price, cost_price, stock_qty, reorder_threshold)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (fields['name'], fields['sku'], fields['price'], fields['cost_price'],
+              stock_qty, fields['reorder_threshold']))
         g.db.commit()
         return jsonify({'success': True, 'id': cur.lastrowid})
     except sqlite3.IntegrityError:
@@ -276,9 +295,10 @@ def api_update_product(id):
         # stock_qty is deliberately not updatable here: overwriting it from a stale edit
         # form would erase concurrent sales. Stock changes go through orders and restock.
         g.db.execute("""
-            UPDATE products SET name=?, sku=?, price=?, reorder_threshold=?, updated_at=CURRENT_TIMESTAMP
+            UPDATE products SET name=?, sku=?, price=?, cost_price=?, reorder_threshold=?,
+                   updated_at=CURRENT_TIMESTAMP
             WHERE id=?
-        """, (fields['name'], fields['sku'], fields['price'],
+        """, (fields['name'], fields['sku'], fields['price'], fields['cost_price'],
               fields['reorder_threshold'], id))
         g.db.commit()
         return jsonify({'success': True})
@@ -431,22 +451,31 @@ def api_restock():
     items = data.get('items')
     if not isinstance(items, list) or not items:
         return _err('At least one item required')
-    batch_total_cost = data.get('total_cost', 0)
-    if isinstance(batch_total_cost, bool) or not isinstance(batch_total_cost, (int, float)) or not (batch_total_cost >= 0):
-        return _err('Total cost must be 0 or more')
-    batch_total_cost = float(batch_total_cost)
+    # Invoice-level charges: each is optional and defaults to nothing, since the common
+    # invoice has no voucher and no bank fee.
+    charges = {}
+    for key in ('discount', 'shipping_cost', 'admin_fee'):
+        value = data.get(key, 0)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not (value >= 0):
+            # One message for all three: a literal here is what the i18n coverage test
+            # scans for, and a per-field table would slip past it untranslated.
+            return _err('Discount, shipping and admin fee must each be 0 or more')
+        charges[key] = float(value)
     validated = []
     for item in items:
         product_id = item.get('product_id') if isinstance(item, dict) else None
         qty_added = item.get('qty') if isinstance(item, dict) else None
+        unit_price = item.get('unit_price', 0) if isinstance(item, dict) else None
         if not product_id or not isinstance(qty_added, int) or isinstance(qty_added, bool) or qty_added <= 0:
             return _err('Valid product and positive whole-number quantity required')
-        validated.append({'product_id': product_id, 'qty': qty_added})
+        if isinstance(unit_price, bool) or not isinstance(unit_price, (int, float)) or not (unit_price >= 0):
+            return _err('Unit price must be 0 or more')
+        validated.append({'product_id': product_id, 'qty': qty_added, 'unit_price': float(unit_price)})
     try:
-        services.create_restock(g.db, validated, batch_total_cost)
+        result = services.create_restock(g.db, validated, **charges)
     except ServiceError as e:
         return _service_error(e)
-    return jsonify({'success': True, 'total_cost': batch_total_cost})
+    return jsonify({'success': True, 'total_cost': result['total_cost']})
 
 @app.route('/api/restock/history', methods=['GET'])
 @login_required
@@ -454,7 +483,8 @@ def api_restock_history():
     period = request.args.get('period', 'all')
     tz = _client_tz(request.args.get('tz'))
     query = """
-        SELECT rb.id, rb.total_cost, rb.created_at
+        SELECT rb.id, rb.subtotal_cost, rb.discount, rb.shipping_cost, rb.admin_fee,
+               rb.total_cost, rb.created_at
         FROM restock_batches rb
         WHERE 1=1
     """
@@ -479,6 +509,10 @@ def api_restock_history():
         """, (b['id'],)).fetchall()
         result.append({
             'id': b['id'],
+            'subtotal_cost': b['subtotal_cost'],
+            'discount': b['discount'],
+            'shipping_cost': b['shipping_cost'],
+            'admin_fee': b['admin_fee'],
             'total_cost': b['total_cost'],
             'created_at': b['created_at'],
             'items': [dict(i) for i in items]
@@ -749,8 +783,9 @@ def api_sales_summary():
     except ServiceError as e:
         return _service_error(e)
     return jsonify({k: summary[k] for k in (
-        'total_revenue', 'total_orders', 'unique_skus',
-        'total_items_sold', 'restock_cost', 'self_use_value', 'net_profit')})
+        'total_revenue', 'total_orders', 'unique_skus', 'total_items_sold',
+        'restock_cost', 'self_use_value', 'cogs', 'gross_profit',
+        'uncosted_sales', 'net_profit')})
 
 @app.route('/api/sales/product-value', methods=['GET'])
 @login_required
@@ -810,7 +845,7 @@ UNSOLD_PAGE_LIMIT = 10
 @app.route('/api/sales/product-performance', methods=['GET'])
 @login_required
 def api_sales_product_performance():
-    """How products did over the window: volume leaders, value leaders, and idlers.
+    """How products did over the window: volume leaders, profit leaders, and idlers.
 
     One endpoint for three panels that always refresh together, so switching period
     costs one round trip.
@@ -828,7 +863,8 @@ def api_sales_product_performance():
     unsold = services.products_without_sales(db, start, end)
     return jsonify({
         'by_quantity': services.top_products_by_quantity(db, start, end),
-        'by_value': services.top_products_by_value(db, start, end),
+        'by_profit': services.top_products_by_profit(db, start, end),
+        'uncosted_sales': services.sales_missing_cost(db, start, end),
         'unsold': {
             'items': unsold[:UNSOLD_PAGE_LIMIT],
             'total': len(unsold),
