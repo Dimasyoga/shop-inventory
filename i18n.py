@@ -187,9 +187,16 @@ TRANSLATIONS = {
         'Restock Cost': 'Biaya Restok',
         'Net Profit': 'Laba Bersih',
         'Sales Trend': 'Tren Penjualan',
-        'Top 3 Sellers': '3 Terlaris',
-        'Bottom 3 Sellers': '3 Terbawah',
+        'Top 3 by Quantity': '3 Terlaris (Jumlah)',
+        'Top 3 by Sales Value': '3 Terlaris (Nilai)',
         'Qty Sold': 'Jml Terjual',
+        'Share': 'Kontribusi',
+        'Products With No Sales': 'Produk Tanpa Penjualan',
+        'Stock': 'Stok',
+        'Stock Value': 'Nilai Stok',
+        'All products sold at least once': 'Semua produk terjual setidaknya sekali',
+        'Stock value at risk: {amount}': 'Nilai stok menganggur: {amount}',
+        'Showing {shown} of {total}': 'Menampilkan {shown} dari {total}',
         'No data yet': 'Belum ada data',
         'Week {n}': 'Minggu {n}',   # sales-trend x-axis label for the month view
 
@@ -216,6 +223,9 @@ TRANSLATIONS = {
         'Qty Added': 'Jml Ditambah',
         'Allocated Cost': 'Biaya Dialokasikan',
         'No records for this month': 'Tidak ada catatan untuk bulan ini',
+        'Active products with no completed sale this month, most valuable idle stock first. Stock value is the current price times the quantity on hand.':
+            'Produk aktif tanpa penjualan selesai bulan ini, stok menganggur termahal lebih dulu. Nilai stok adalah harga saat ini dikali jumlah yang tersedia.',
+        'Products: {n} — stock value {amount}': 'Produk: {n} — nilai stok {amount}',
         'Orders: {n} — total {amount}': 'Pesanan: {n} — total {amount}',
         'Batches: {n} — total {amount}': 'Batch: {n} — total {amount}',
         'A PDF with the month summary plus every sale, restock and self-use record, for audit. Saved on the server and sendable to your whitelisted Telegram IDs.':

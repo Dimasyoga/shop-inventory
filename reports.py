@@ -13,7 +13,8 @@ from datetime import datetime, timezone
 
 import i18n
 import services
-from services import build_date_filter, format_rupiah, get_date_range
+from services import (build_date_filter, format_percent, format_rupiah,
+                      get_date_range)
 
 log = logging.getLogger('reports')
 
@@ -125,19 +126,6 @@ def self_use_batches(db, start, end):
                   ('quantity', 'unit_price', 'subtotal'))
 
 
-def _sellers(db, start, end, direction):
-    date_filter, params = build_date_filter(start, end, 'o.created_at')
-    return db.execute("""
-        SELECT p.name, p.sku, SUM(oi.quantity) AS total_sold,
-               SUM(oi.subtotal) AS total_revenue
-        FROM order_items oi
-        JOIN orders o ON oi.order_id = o.id
-        JOIN products p ON oi.product_id = p.id
-        WHERE o.status = 'completed'
-    """ + date_filter + f" GROUP BY p.id ORDER BY total_sold {direction} LIMIT 3",
-        params).fetchall()
-
-
 def collect(db, offset, tz, lang, now=None):
     """Everything the report renders, for the month `offset` months back.
 
@@ -159,8 +147,11 @@ def collect(db, offset, tz, lang, now=None):
         # Stock value is a point-in-time figure, not a windowed one: it describes
         # the shelves right now, not at month end, and is labelled as such.
         'stock_value': stock_value,
-        'top': _sellers(db, start, end, 'DESC'),
-        'bottom': _sellers(db, start, end, 'ASC'),
+        'by_quantity': services.top_products_by_quantity(db, start, end),
+        'by_value': services.top_products_by_value(db, start, end),
+        # Unsliced: an audit document should account for every idle product, and the
+        # section paginates on its own if the list is long.
+        'unsold': services.products_without_sales(db, start, end),
         'orders': completed_orders(db, start, end),
         'restocks': restock_batches(db, start, end),
         'self_uses': self_use_batches(db, start, end),
@@ -292,19 +283,23 @@ def _summary_page(pdf, data, t):
     pdf.ln(6)
     pdf.set_text_color(0)
 
-    seller_cols = [t('Product'), t('SKU'), t('Qty Sold'), t('Revenue')]
+    lang = t.lang
     seller_widths = (68, 34, 22, 34)
     seller_align = ('LEFT', 'LEFT', 'RIGHT', 'RIGHT')
-    _heading(pdf, t('Top 3 Sellers'), size=11)
-    _table(pdf, seller_cols, [
+
+    _heading(pdf, t('Top 3 by Quantity'), size=11)
+    _table(pdf, [t('Product'), t('SKU'), t('Qty Sold'), t('Revenue')], [
         (r['name'], r['sku'] or '—', r['total_sold'], format_rupiah(r['total_revenue']))
-        for r in data['top']
+        for r in data['by_quantity']
     ], widths=seller_widths, align=seller_align, empty_text=t('No data yet'))
 
-    _heading(pdf, t('Bottom 3 Sellers'), size=11)
-    _table(pdf, seller_cols, [
-        (r['name'], r['sku'] or '—', r['total_sold'], format_rupiah(r['total_revenue']))
-        for r in data['bottom']
+    # Ranked by money rather than units, so a cheap high-volume line cannot hide
+    # which products actually carried the month.
+    _heading(pdf, t('Top 3 by Sales Value'), size=11)
+    _table(pdf, [t('Product'), t('SKU'), t('Revenue'), t('Share')], [
+        (r['name'], r['sku'] or '—', format_rupiah(r['total_revenue']),
+         format_percent(r['share'], lang))
+        for r in data['by_value']
     ], widths=seller_widths, align=seller_align, empty_text=t('No data yet'))
 
 
@@ -382,6 +377,27 @@ def _self_use_section(pdf, data, t):
         empty_text=t('No records for this month'))
 
 
+def _no_sales_section(pdf, data, t):
+    """Appendix: active products that sold nothing in the month.
+
+    An appendix rather than part of page 1, because the list is unbounded -- it can
+    run to more rows than every transaction in a quiet month.
+    """
+    rows = [(p['name'], p['sku'] or '—', p['stock_qty'], format_rupiah(p['stock_value']))
+            for p in data['unsold']]
+    at_risk = sum(p['stock_value'] for p in data['unsold'])
+    _record_section(
+        pdf, t('Products With No Sales'),
+        t('Active products with no completed sale this month, most valuable idle stock first. Stock value is the current price times the quantity on hand.'),
+        [t('Product'), t('SKU'), t('Stock'), t('Stock Value')],
+        widths=(78, 40, 22, 41),
+        align=('LEFT', 'LEFT', 'RIGHT', 'RIGHT'),
+        rows=rows,
+        total_row=t('Products: {n} — stock value {amount}',
+                    n=len(rows), amount=format_rupiah(at_risk)),
+        empty_text=t('All products sold at least once'))
+
+
 def render(data, t):
     """Render collected report data to PDF bytes."""
     pdf = _pdf_class()(t('Monthly Report'), data['label'])
@@ -391,6 +407,7 @@ def render(data, t):
     _sales_section(pdf, data, t)
     _restock_section(pdf, data, t)
     _self_use_section(pdf, data, t)
+    _no_sales_section(pdf, data, t)
     return bytes(pdf.output())
 
 

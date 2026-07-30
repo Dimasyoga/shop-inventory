@@ -37,6 +37,19 @@ def format_rupiah(amount):
     return f'{sign}Rp {formatted}'
 
 
+def format_percent(value, lang='en'):
+    """Percentage to one decimal: '61.3%', or '61,3%' in Indonesian.
+
+    One decimal rather than a whole number so a small contributor reads as 0.4%
+    instead of vanishing to 0%. The decimal separator follows the language for the
+    same reason format_rupiah uses dot-thousands.
+    """
+    out = f'{value:.1f}'
+    if lang == 'id':
+        out = out.replace('.', ',')
+    return f'{out}%'
+
+
 def get_date_range(unit, offset=0, tz=timezone.utc, now=None):
     """Half-open [start, end) as tz-aware datetimes in tz. (None, None) for an unknown unit."""
     now = now or datetime.now(tz)
@@ -333,6 +346,82 @@ def sales_summary(db, unit, offset, tz, now=None):
         'start': start,
         'end': end,
     }
+
+
+# --- Product performance (shared by the sales page and the monthly report) ---
+
+# Sold quantity and revenue per product over a window. Revenue per product has to
+# come from order_items.subtotal: orders.total_amount is a separately stored figure
+# for the whole order and cannot be attributed to a line.
+_SOLD_PER_PRODUCT = """
+    SELECT p.id, p.name, p.sku,
+           SUM(oi.quantity) AS total_sold,
+           SUM(oi.subtotal) AS total_revenue
+    FROM order_items oi
+    JOIN orders o ON oi.order_id = o.id
+    JOIN products p ON oi.product_id = p.id
+    WHERE o.status = 'completed'
+"""
+
+
+def _sold_per_product(db, start, end, order_by, limit):
+    date_filter, params = build_date_filter(start, end, 'o.created_at')
+    rows = db.execute(
+        _SOLD_PER_PRODUCT + date_filter + f" GROUP BY p.id ORDER BY {order_by} LIMIT ?",
+        params + (limit,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def top_products_by_quantity(db, start, end, limit=3):
+    """Best sellers by units moved."""
+    return _sold_per_product(db, start, end, 'total_sold DESC', limit)
+
+
+def top_products_by_value(db, start, end, limit=3):
+    """Best sellers by revenue, each with its `share` of the window's sales value.
+
+    Share is a percentage of the summed line subtotals, NOT of sales_summary's
+    total_revenue: that comes from orders.total_amount, a separately stored value
+    that can disagree with the sum of its lines, so dividing by it would produce
+    shares that never total 100.
+    """
+    rows = _sold_per_product(db, start, end, 'total_revenue DESC', limit)
+    date_filter, params = build_date_filter(start, end, 'o.created_at')
+    total = db.execute("""
+        SELECT COALESCE(SUM(oi.subtotal), 0) AS total
+        FROM order_items oi
+        JOIN orders o ON oi.order_id = o.id
+        WHERE o.status = 'completed'
+    """ + date_filter, params).fetchone()['total']
+    for row in rows:
+        row['share'] = (row['total_revenue'] / total * 100) if total else 0.0
+    return rows
+
+
+def products_without_sales(db, start, end):
+    """Active products with no completed-order line in the window.
+
+    The dead stock the top-seller queries structurally cannot show: they inner-join
+    order_items, so a product must have sold at least once to appear at all.
+    Ordered by the capital tied up in it, so the most expensive idle stock is first.
+    Returns every match -- callers slice for display.
+    """
+    date_filter, params = build_date_filter(start, end, 'o.created_at')
+    rows = db.execute("""
+        SELECT p.id, p.name, p.sku, p.stock_qty,
+               p.price * p.stock_qty AS stock_value
+        FROM products p
+        WHERE p.is_archived = 0
+          AND p.id NOT IN (
+              SELECT oi.product_id
+              FROM order_items oi
+              JOIN orders o ON oi.order_id = o.id
+              WHERE o.status = 'completed'
+    """ + date_filter + """
+          )
+        ORDER BY stock_value DESC, p.name
+    """, params).fetchall()
+    return [dict(r) for r in rows]
 
 
 # --- Stale-order alerts (used by the Telegram bot poller) ---

@@ -218,10 +218,11 @@ def test_trend_rejects_bad_offset(client):
     assert client.get("/api/sales/trend?unit=day&offset=xyz").status_code == 400
 
 
-def test_top_products_respects_day_window(client, insert, product):
+def test_product_performance_respects_day_window(client, insert, product):
     _completed_order(insert, utc_now() - timedelta(seconds=5), 3000, product)
-    data = client.get(f"/api/sales/top-products?unit=day&offset=0&tz={JAKARTA}").get_json()
-    assert data["top"][0]["name"] == "Kopi"
+    data = client.get(
+        f"/api/sales/product-performance?unit=day&offset=0&tz={JAKARTA}").get_json()
+    assert data["by_quantity"][0]["name"] == "Kopi"
 
 
 # --- Dashboard ---

@@ -230,7 +230,13 @@ The server starts at `http://localhost:5000`. Default login: **admin** / **admin
 - Period selector: Today, This Week, This Month, This Year, All Time
 - **Summary stats**: Revenue, completed orders, unique SKUs, items sold, restock cost, net profit, product value, self use
 - **Trend chart**: Daily revenue line chart (Chart.js)
-- **Top 3 / Bottom 3 sellers**: By quantity sold
+- **Product performance**, three panels answering three different questions:
+  - **Top 3 by Quantity** — what moves the most units
+  - **Top 3 by Sales Value** — what earns the most money, with each product's share
+    of the period's revenue. A cheap high-volume line can top the quantity table
+    while contributing little of the money, which is the point of having both
+  - **Products With No Sales** — active products that sold nothing in the period,
+    most valuable idle stock first, with the total value tied up in them
 - **Monthly Report**: Pick a month, then **Download PDF** or **Send to Telegram**
 
 #### Monthly Report
@@ -239,16 +245,24 @@ A PDF for one calendar month, for audit:
 
 - **Page 1** — the month's sales performance: revenue, completed orders, unique
   SKUs, items sold, restock cost, net profit, self use, current stock value, plus
-  top 3 / bottom 3 sellers
+  top 3 by quantity and top 3 by sales value
 - **Sales Records** — every completed order, one row per product sold, with unit
   price and subtotal
 - **Restock Records** — every batch, one row per product, with allocated cost
 - **Self Use Records** — every batch, one row per product, at the recorded price
+- **Products With No Sales** — appendix listing every active product that sold
+  nothing that month and the stock value sitting in it
 
 Notes:
 
 - Month boundaries follow the **shop timezone** from Settings, not the browser's,
   so the archived file and the copy the bot sends always describe the same period
+- "Share" is a product's share of **revenue**, not of margin. Restock cost is
+  allocated per batch pro-rata by quantity, so there is no per-unit cost of goods to
+  compute a real contribution margin from — that would need per-unit cost tracking.
+  Shares are taken over the summed line subtotals, so they total 100%
+- The no-sales appendix is complete rather than capped, unlike the panel on the
+  sales page, and paginates on its own for a large catalogue
 - Written to `SHOP_REPORT_DIR` (`/data/reports` in Docker) as
   `shop-report-YYYY-MM.pdf`, **overwritten** on regeneration rather than duplicated
 - The picker offers the current month too, as a month-to-date snapshot; the

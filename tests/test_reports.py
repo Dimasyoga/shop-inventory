@@ -155,6 +155,47 @@ def test_summary_describes_the_reported_month_not_today(db_path, shop):
     assert s["net_profit"] == 45000 - 100000
 
 
+def test_collect_ranks_products_by_value_as_well_as_quantity(db_path, insert):
+    cheap = insert("products", "2026-01-01 00:00:00", name="Teh", sku="TM-1",
+                   price=2000, stock_qty=50)
+    pricey = insert("products", "2026-01-01 00:00:00", name="Kopi", sku="KP-1",
+                    price=50000, stock_qty=20)
+    conn = database.get_db()
+    for pid, qty, price in ((cheap, 100, 2000), (pricey, 6, 50000)):
+        cur = conn.execute("INSERT INTO orders (status, total_amount, created_at)"
+                           " VALUES ('completed', ?, '2026-06-10 03:00:00')", (qty * price,))
+        conn.execute("INSERT INTO order_items (order_id, product_id, quantity, unit_price,"
+                     " subtotal) VALUES (?, ?, ?, ?, ?)",
+                     (cur.lastrowid, pid, qty, price, qty * price))
+    conn.commit()
+    conn.close()
+    data = collect(offset=1)
+    assert data["by_quantity"][0]["name"] == "Teh"       # 100 units
+    assert data["by_value"][0]["name"] == "Kopi"         # Rp 300.000 of Rp 500.000
+    assert data["by_value"][0]["share"] == pytest.approx(60.0)
+
+
+def test_collect_lists_products_with_no_sales(db_path, shop):
+    # The product exists and never sold in June, so it belongs in the appendix.
+    unsold = collect(offset=1)["unsold"]
+    assert [p["name"] for p in unsold] == ["Kopi"]
+    assert unsold[0]["stock_value"] == 15000 * 100
+
+
+def test_collect_omits_a_product_that_sold_from_the_unsold_list(db_path, shop):
+    shop.order("2026-06-10 03:00:00", qty=1)
+    assert collect(offset=1)["unsold"] == []
+
+
+def test_unsold_is_not_truncated_for_the_report(db_path, insert):
+    # The web page caps its panel; an audit document must account for all of them.
+    import app as app_module
+    for i in range(app_module.UNSOLD_PAGE_LIMIT + 3):
+        insert("products", "2026-01-01 00:00:00", name=f"P{i:02d}", sku=f"S{i}",
+               price=1000, stock_qty=1)
+    assert len(collect(offset=1)["unsold"]) == app_module.UNSOLD_PAGE_LIMIT + 3
+
+
 # --- Rendering ---
 
 def test_render_produces_a_pdf(db_path, shop):
@@ -170,6 +211,19 @@ def test_render_produces_a_pdf(db_path, shop):
 def test_render_handles_a_month_with_no_records(db_path, shop):
     content = reports.render(collect(offset=1), EN)
     assert content.startswith(b"%PDF-")
+
+
+def test_render_includes_the_no_sales_appendix(db_path, insert):
+    # A long idle list must paginate rather than overflow page 1, so assert the page
+    # count grows with it: four fixed sections plus the appendix's own pages.
+    for i in range(60):
+        insert("products", "2026-01-01 00:00:00", name=f"P{i:02d}", sku=f"S{i}",
+               price=1000, stock_qty=1)
+    data = collect(offset=1)
+    assert len(data["unsold"]) == 60
+    content = reports.render(data, EN)
+    assert content.startswith(b"%PDF-")
+    assert content.count(b"/Type /Page\n") > 4
 
 
 def test_render_handles_non_latin1_product_names(db_path, insert):

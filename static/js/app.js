@@ -16,6 +16,14 @@ function formatRupiah(amount) {
     return sign + 'Rp ' + formatted;
 }
 
+/* Mirrors services.format_percent. toLocaleString handles the Indonesian decimal
+   comma, so the separator follows the UI language without a table. */
+function formatPercent(value) {
+    return value.toLocaleString(DATE_LOCALE, {
+        minimumFractionDigits: 1, maximumFractionDigits: 1
+    }) + '%';
+}
+
 function showToast(msg, type = 'success') {
     const t = document.createElement('div');
     t.className = `toast toast-${type}`;
@@ -428,7 +436,7 @@ function loadSalesData() {
     updateTimeLabel();
     loadSalesSummary();
     loadSalesTrend();
-    loadTopProducts();
+    loadProductPerformance();
 }
 
 function loadSalesSummary() {
@@ -491,22 +499,37 @@ function loadSalesTrend() {
         });
 }
 
-function loadTopProducts() {
-    fetchJson('/api/sales/top-products?' + buildSalesParams())
+function loadProductPerformance() {
+    fetchJson('/api/sales/product-performance?' + buildSalesParams())
         .then(d => {
-            const topBody = document.getElementById('top-sellers-body');
-            const bottomBody = document.getElementById('bottom-sellers-body');
-            const sellerRow = p => `
-                <tr>
-                    <td>${escapeHtml(p.name)}</td>
-                    <td>${escapeHtml(p.sku || '-')}</td>
-                    <td>${p.total_sold}</td>
-                    <td>${formatRupiah(p.total_revenue)}</td>
-                </tr>
-            `;
-            const emptyRow = `<tr><td colspan="4" class="empty-row">${t('No data yet')}</td></tr>`;
-            topBody.innerHTML = d.top.length ? d.top.map(sellerRow).join('') : emptyRow;
-            bottomBody.innerHTML = d.bottom.length ? d.bottom.map(sellerRow).join('') : emptyRow;
+            const row = cells => `<tr>${cells.map(c => `<td>${c}</td>`).join('')}</tr>`;
+            const fill = (id, items, cells, empty) => {
+                document.getElementById(id).innerHTML = items.length
+                    ? items.map(p => row(cells(p))).join('')
+                    : `<tr><td colspan="4" class="empty-row">${empty}</td></tr>`;
+            };
+            const name = p => escapeHtml(p.name);
+            const sku = p => escapeHtml(p.sku || '-');
+
+            fill('qty-sellers-body', d.by_quantity,
+                 p => [name(p), sku(p), p.total_sold, formatRupiah(p.total_revenue)],
+                 t('No data yet'));
+            fill('value-sellers-body', d.by_value,
+                 p => [name(p), sku(p), formatRupiah(p.total_revenue), formatPercent(p.share)],
+                 t('No data yet'));
+            fill('unsold-body', d.unsold.items,
+                 p => [name(p), sku(p), p.stock_qty, formatRupiah(p.stock_value)],
+                 t('All products sold at least once'));
+
+            // Only worth saying how much was withheld when something was.
+            const shown = d.unsold.items.length;
+            const summary = shown
+                ? t('Stock value at risk: {amount}', { amount: formatRupiah(d.unsold.total_stock_value) })
+                  + (shown < d.unsold.total
+                     ? ' — ' + t('Showing {shown} of {total}', { shown: shown, total: d.unsold.total })
+                     : '')
+                : '';
+            document.getElementById('unsold-summary').textContent = summary;
         });
 }
 

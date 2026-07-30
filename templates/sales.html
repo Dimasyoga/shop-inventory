@@ -91,27 +91,40 @@
 
 <div class="grid-2">
     <div class="card">
-        <h3>{{ t('Top 3 Sellers') }}</h3>
+        <h3>{{ t('Top 3 by Quantity') }}</h3>
         <table class="data-table">
             <thead>
                 <tr><th>{{ t('Product') }}</th><th>{{ t('SKU') }}</th><th>{{ t('Qty Sold') }}</th><th>{{ t('Revenue') }}</th></tr>
             </thead>
-            <tbody id="top-sellers-body">
+            <tbody id="qty-sellers-body">
                 <tr><td colspan="4" class="empty-row">{{ t('No data yet') }}</td></tr>
             </tbody>
         </table>
     </div>
     <div class="card">
-        <h3>{{ t('Bottom 3 Sellers') }}</h3>
+        <h3>{{ t('Top 3 by Sales Value') }}</h3>
         <table class="data-table">
             <thead>
-                <tr><th>{{ t('Product') }}</th><th>{{ t('SKU') }}</th><th>{{ t('Qty Sold') }}</th><th>{{ t('Revenue') }}</th></tr>
+                <tr><th>{{ t('Product') }}</th><th>{{ t('SKU') }}</th><th>{{ t('Revenue') }}</th><th>{{ t('Share') }}</th></tr>
             </thead>
-            <tbody id="bottom-sellers-body">
+            <tbody id="value-sellers-body">
                 <tr><td colspan="4" class="empty-row">{{ t('No data yet') }}</td></tr>
             </tbody>
         </table>
     </div>
+</div>
+
+<div class="card">
+    <h3>{{ t('Products With No Sales') }}</h3>
+    <p class="help-text" id="unsold-summary"></p>
+    <table class="data-table">
+        <thead>
+            <tr><th>{{ t('Product') }}</th><th>{{ t('SKU') }}</th><th>{{ t('Stock') }}</th><th>{{ t('Stock Value') }}</th></tr>
+        </thead>
+        <tbody id="unsold-body">
+            <tr><td colspan="4" class="empty-row">{{ t('No data yet') }}</td></tr>
+        </tbody>
+    </table>
 </div>
 
 <div class="card">

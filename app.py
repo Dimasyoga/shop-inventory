@@ -875,9 +875,18 @@ def api_sales_trend():
         return jsonify([{'label': month_names.get(k, k), 'revenue': v} for k, v in sorted(buckets.items())])
     return jsonify([{'label': k, 'revenue': v} for k, v in sorted(buckets.items())])
 
-@app.route('/api/sales/top-products', methods=['GET'])
+# Idle products listed on the sales page. The totals alongside cover every match,
+# so the card can say how many were left out and what they are collectively worth.
+UNSOLD_PAGE_LIMIT = 10
+
+@app.route('/api/sales/product-performance', methods=['GET'])
 @login_required
-def api_sales_top_products():
+def api_sales_product_performance():
+    """How products did over the window: volume leaders, value leaders, and idlers.
+
+    One endpoint for three panels that always refresh together, so switching period
+    costs one round trip.
+    """
     unit = request.args.get('unit', 'month')
     offset = _int_arg('offset')
     if offset is None:
@@ -888,19 +897,15 @@ def api_sales_top_products():
         return _err('invalid unit')
 
     db = g.db
-    date_filter, params = build_date_filter(start, end)
-    base_query = """
-        SELECT p.id, p.name, p.sku, SUM(oi.quantity) as total_sold, SUM(oi.subtotal) as total_revenue
-        FROM order_items oi
-        JOIN orders o ON oi.order_id = o.id
-        JOIN products p ON oi.product_id = p.id
-        WHERE o.status = 'completed'
-    """ + date_filter
-    top = db.execute(base_query + " GROUP BY p.id ORDER BY total_sold DESC LIMIT 3", params).fetchall()
-    bottom = db.execute(base_query + " GROUP BY p.id ORDER BY total_sold ASC LIMIT 3", params).fetchall()
+    unsold = services.products_without_sales(db, start, end)
     return jsonify({
-        'top': [{'id': r['id'], 'name': r['name'], 'sku': r['sku'], 'total_sold': r['total_sold'], 'total_revenue': r['total_revenue']} for r in top],
-        'bottom': [{'id': r['id'], 'name': r['name'], 'sku': r['sku'], 'total_sold': r['total_sold'], 'total_revenue': r['total_revenue']} for r in bottom]
+        'by_quantity': services.top_products_by_quantity(db, start, end),
+        'by_value': services.top_products_by_value(db, start, end),
+        'unsold': {
+            'items': unsold[:UNSOLD_PAGE_LIMIT],
+            'total': len(unsold),
+            'total_stock_value': sum(p['stock_value'] for p in unsold),
+        },
     })
 
 # --- Monthly report ---
