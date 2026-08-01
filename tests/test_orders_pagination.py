@@ -118,7 +118,6 @@ def test_orders_taken_in_the_same_second_still_page_cleanly(client, db_path):
     Without one their relative order is up to the query planner, and a row can drift
     across the page boundary between two requests -- appearing twice, or not at all.
     """
-    pid = product()
     conn = database.get_db()
     ids = []
     for _ in range(25):

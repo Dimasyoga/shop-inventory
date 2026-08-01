@@ -18,7 +18,7 @@ import reports
 import services
 import telegram_bot
 from services import (ServiceError, format_rupiah, get_date_range,
-                      build_date_filter, _to_utc_str)
+                      build_date_filter)
 from telegram_bot import TelegramAPI, TelegramError
 
 log = logging.getLogger('app')
@@ -805,7 +805,7 @@ def api_settings_language():
 @app.route('/api/settings/telegram', methods=['POST'])
 @login_required
 def api_settings_telegram():
-    from database import get_setting, set_setting, get_secret_setting, set_secret_setting
+    from database import set_setting, get_secret_setting, set_secret_setting
     data = _json_body()
     if data is None:
         return _err('Invalid JSON body')

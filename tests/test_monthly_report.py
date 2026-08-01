@@ -4,10 +4,9 @@ The schedule is driven by the persisted `last_report_period` marker rather than 
 timer, so these drive `send_monthly_report` with an explicit `now` and assert on
 the marker — the thing that has to survive a restart.
 """
-from datetime import datetime, timezone
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
-import pytest
 
 import database
 import i18n

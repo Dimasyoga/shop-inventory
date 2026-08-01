@@ -1,7 +1,6 @@
 import sqlite3
 import logging
 import os
-from datetime import datetime
 from cryptography.fernet import Fernet, InvalidToken
 from werkzeug.security import generate_password_hash
 

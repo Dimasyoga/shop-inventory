@@ -8,8 +8,6 @@ use costs writes and buys nothing, and nothing else in the suite would notice.
 """
 import sqlite3
 
-import pytest
-
 import database
 
 EXPECTED = {

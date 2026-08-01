@@ -1,0 +1,21 @@
+# Standalone rather than a [tool.ruff] table: there is no pyproject.toml here, pytest
+# is configured the same way in pytest.ini, and adopting a linter is not the change
+# that should decide how this project declares itself.
+
+exclude = ["venv", "__pycache__", ".pytest_cache"]
+
+[lint]
+# Ruff's defaults: E4/E7/E9 (the pycodestyle errors worth failing a build over) plus
+# F, which is the point of this -- unused imports, unused locals, undefined names.
+select = ["E4", "E7", "E9", "F"]
+
+# Line length is not a rule this codebase can hold. A hundred-odd lines are over any
+# sane limit and nearly all are translation sources in i18n.py or t('...') calls in
+# reports.py, one of them 469 characters. They cannot be wrapped: implicit
+# concatenation would hide them from tests/test_i18n_coverage.py, which scans for one
+# string literal per call site and is what stops a string shipping untranslated.
+ignore = ["E501"]
+
+# Deliberately NOT enabled: "I" (import sorting). It would rewrite the imports of
+# every file in the repo for no functional gain and bury the real findings in the
+# first diff.

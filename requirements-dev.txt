@@ -1,2 +1,6 @@
 -r requirements.txt
 pytest==9.1.1
+# Linting. Pinned like the runtime deps: ruff adds rules between releases, and an
+# unpinned one turns "someone else released a version" into a red build on a branch
+# that changed nothing. Configured in ruff.toml.
+ruff==0.16.1

@@ -41,7 +41,6 @@ def test_history_orders_newest_first(client, insert):
 
 def test_history_today_uses_client_timezone_boundary(client, insert):
     """23:00 WIB yesterday is 16:00 UTC today: it must not count as 'today' in Jakarta."""
-    today_wib = datetime.now(timezone.utc).astimezone().date()
     # Build instants relative to the client's real "today" so the test is date-independent.
     from zoneinfo import ZoneInfo
     jkt = ZoneInfo(JAKARTA)

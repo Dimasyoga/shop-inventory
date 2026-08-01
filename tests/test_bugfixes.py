@@ -324,7 +324,7 @@ def test_cancel_twice_rejected(client, product, order):
 
 def test_cancelled_filter_and_dashboard_count(client, product, order):
     pid = product()
-    kept = order([(pid, 1, 1000)], status="completed")
+    order([(pid, 1, 1000)], status="completed")  # stays, and stays counted
     dropped = order([(pid, 1, 1000)], status="draft")
     client.post(f"/api/orders/{dropped}/cancel")
 

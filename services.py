@@ -560,7 +560,7 @@ def void_restock(db, batch_id):
     # dict.fromkeys keeps first-seen order: a batch may list a product twice, and only
     # the first line's snapshot describes the state before the batch as a whole.
     for product_id in dict.fromkeys(line['product_id'] for line in lines):
-        first = next(l for l in lines if l['product_id'] == product_id)
+        first = next(row for row in lines if row['product_id'] == product_id)
         if _blended_since(db, product_id, batch_id):
             flagged.append(first['product_name'])
             flagged_ids.append(product_id)

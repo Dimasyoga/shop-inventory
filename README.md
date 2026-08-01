@@ -393,8 +393,14 @@ the bot (see [Secrets at rest](#secrets-at-rest)). Worth putting in cron:
 it at any time, so they are not backed up — but if a signed-off PDF is your audit
 record of record, copy `/data/reports` separately.
 
-Nothing prunes old backups; a nightly cron job will fill the disk eventually. Add
-your own `find backups -name 'shop-*.db' -mtime +30 -delete` if that matters.
+Old backups are pruned after each successful run: `shop-*.db` older than 30 days go,
+but the 7 most recent always survive however old they are — so a shop that let the
+cron lapse for months does not lose its last backup to the run that resumes it.
+Override with `BACKUP_KEEP_DAYS` and `BACKUP_KEEP_MIN`.
+
+`pre-restore-*.db` — the safety copies [restoring](#restoring) writes — are never
+pruned. They exist because something irreversible was about to happen, so outliving a
+routine cleanup is the point of them; delete those by hand when you are sure.
 
 ### Restoring
 

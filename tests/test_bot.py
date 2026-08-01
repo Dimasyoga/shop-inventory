@@ -514,7 +514,6 @@ def test_summary_renders_revenue_and_navigates(bot):
 
 def test_summary_month_name_localized(bot):
     import i18n
-    from datetime import datetime, timezone
     api, drive = bot
     set_language("id")
     drive(cb_update("s:m:0"))            # month view
@@ -540,7 +539,6 @@ def test_menu_offers_the_monthly_report(bot):
 
 def test_report_picker_lists_closed_months(bot):
     import i18n
-    from datetime import datetime, timezone
     api, drive = bot
     drive(cb_update("rp"))
     # Six closed months, each an offset >= 1: the current month is still running
@@ -554,7 +552,6 @@ def test_report_picker_lists_closed_months(bot):
 
 def test_report_picker_localized(bot):
     import i18n
-    from datetime import datetime, timezone
     api, drive = bot
     set_language("id")
     drive(cb_update("rp"))

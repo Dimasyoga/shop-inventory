@@ -165,7 +165,6 @@ TRANSLATIONS = {
         # --- Restock ---
         'New Restock': 'Restok Baru',
         'Quantity': 'Jumlah',
-        '+ Add Product': '+ Tambah Produk',
         'Enter the supplier invoice: the price per unit of each product, then any discount, shipping and bank fee that apply to the whole invoice.':
             'Masukkan invoice pemasok: harga per unit setiap produk, lalu diskon, ongkos kirim, dan biaya bank yang berlaku untuk seluruh invoice.',
         'Price per unit': 'Harga per unit',
@@ -370,7 +369,6 @@ TRANSLATIONS = {
         'Complete order #{id}? Stock will be deducted.':
             'Selesaikan pesanan #{id}? Stok akan dikurangi.',
         'Cancel order #{id}?': 'Batalkan pesanan #{id}?',
-        'Order completed': 'Pesanan selesai',
         '📈 Sales — {label}': '📈 Penjualan — {label}',
         'Revenue: {amount}': 'Pendapatan: {amount}',
         'Orders: {orders}   Items sold: {items}': 'Pesanan: {orders}   Item terjual: {items}',

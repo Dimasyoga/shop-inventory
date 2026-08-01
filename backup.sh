@@ -9,7 +9,13 @@
 # of this file. Restoring onto a machine without the key leaves the bot idle
 # until the token is re-entered in Settings -- see the note printed at the end.
 #
+# Old backups are pruned afterwards -- see the retention block at the foot of this
+# file. A nightly cron with nothing deleting its output fills the disk and then takes
+# the app down with it, which is a poor way to find out your backups were working.
+#
 # Usage: ./backup.sh [output-dir]   (default: ./backups)
+#   BACKUP_KEEP_DAYS=30  delete shop-*.db older than this
+#   BACKUP_KEEP_MIN=7    ...but always keep at least this many, however old
 
 set -euo pipefail
 
@@ -17,6 +23,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 OUT_DIR="${1:-$SCRIPT_DIR/backups}"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 NAME="shop-$STAMP.db"
+KEEP_DAYS="${BACKUP_KEEP_DAYS:-30}"
+KEEP_MIN="${BACKUP_KEEP_MIN:-7}"
 
 mkdir -p "$OUT_DIR"
 
@@ -41,7 +49,45 @@ else
     python3 -c "$BACKUP_PY" "$DB" "$OUT_DIR/$NAME"
 fi
 
+# The new backup has to exist and be non-empty before anything old is considered for
+# deletion: pruning first, or after a backup that silently produced nothing, is how a
+# retention policy turns into data loss.
+[ -s "$OUT_DIR/$NAME" ] || { echo "Backup at $OUT_DIR/$NAME is missing or empty" >&2; exit 1; }
+
 echo "Wrote $OUT_DIR/$NAME"
+
+# Retention. Only ever considers shop-*.db, so restore.sh's pre-restore-*.db rescue
+# copies are never in scope -- those exist because someone was about to do something
+# irreversible, and outliving a routine cleanup is the whole point of them.
+#
+# Newest-first, skip the first KEEP_MIN, delete what is left that is older than
+# KEEP_DAYS. The floor is what stops a shop that let the cron lapse for two months
+# from having its last surviving backup deleted by the run that resumes it.
+# Written with explicit if blocks rather than `[ x ] && cmd` one-liners: under
+# `set -e` the exit status of those lists is a subtlety worth nobody's time in a
+# script whose job is deleting files.
+seen=0
+pruned=0
+while IFS= read -r old; do
+    if [ -z "$old" ]; then
+        continue
+    fi
+    seen=$((seen + 1))
+    if [ "$seen" -le "$KEEP_MIN" ]; then
+        continue
+    fi
+    # -mtime +N is "more than N days old", which is what "older than" means here.
+    if [ -n "$(find "$old" -maxdepth 0 -mtime "+$KEEP_DAYS" 2>/dev/null)" ]; then
+        rm -f "$old"
+        echo "  pruned $(basename "$old")"
+        pruned=$((pruned + 1))
+    fi
+done < <(ls -1t "$OUT_DIR"/shop-*.db 2>/dev/null || true)
+
+if [ "$pruned" -gt 0 ]; then
+    echo "Pruned $pruned backup(s) older than $KEEP_DAYS days (kept the $KEEP_MIN newest)."
+fi
+
 echo
 echo "To restore:"
 echo "  ./restore.sh $OUT_DIR/$NAME"

@@ -1,5 +1,4 @@
 """Encryption at rest for settings listed in database.ENCRYPTED_SETTINGS."""
-import sqlite3
 
 import pytest
 from cryptography.fernet import Fernet

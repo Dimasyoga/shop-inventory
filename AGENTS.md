@@ -139,6 +139,7 @@ bilingual (English / Bahasa Indonesia).
 
 ```bash
 bash start.sh            # or: python3 app.py  (serves http://localhost:5000)
+ruff check .             # config in ruff.toml; CI fails on a finding
 ./backup.sh              # backups/shop-<stamp>.db; ./restore.sh <file> puts one back
 source venv/bin/activate && python -m pytest -q   # full suite
 docker compose up -d --build   # deployment path; ./deploy.sh to update
