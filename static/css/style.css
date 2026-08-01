@@ -97,6 +97,10 @@ select { padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-siz
 .cost-unknown { color: #999; }
 .cost-suspect { color: #b9770e; font-weight: 600; cursor: help; }
 .stock-held { color: #999; font-size: 12px; white-space: nowrap; }
+.pager { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 16px; }
+.pager:empty { display: none; }
+.pager button[disabled] { opacity: .45; cursor: default; }
+.pager-label { color: #666; font-size: 14px; }
 
 /* A voided batch and the void reversing it both still count as history -- muted rather
    than hidden, because the audit trail is the point of keeping them. */

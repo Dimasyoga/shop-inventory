@@ -206,17 +206,46 @@ def _price_and_hold(db, items):
     return rows, total
 
 
-def list_orders(db, status=None, page=0, page_size=10):
-    """Orders newest-first, optionally filtered by status. Returns (rows, has_more)."""
+def list_orders(db, status=None, search=None, page=0, page_size=10):
+    """Orders newest-first with their lines. Returns (orders, has_more).
+
+    Each order is a plain dict carrying an ``items`` list. The lines for the whole
+    page come back in one query rather than one per order: the orders page used to
+    fan a query out per row, so its cost grew with every order the shop had ever
+    taken rather than with what it was showing.
+
+    ``search`` matches the order id as a substring, which is how the page's search
+    box has always behaved -- the shop looks up an order by the number on the note.
+    """
     query = "SELECT * FROM orders WHERE 1=1"
     params = []
     if status:
         query += " AND status = ?"
         params.append(status)
-    query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+    if search:
+        query += " AND id LIKE ?"
+        params.append(f'%{search}%')
+    # id breaks ties on created_at, which is only second-resolution: two orders taken
+    # in the same second have no inherent order, and an unstable one lets a row shift
+    # across the page boundary between requests and be shown twice or not at all.
+    # id is the rowid here, so the created_at index carries it and still serves this.
+    query += " ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
     params += [page_size + 1, page * page_size]
     rows = db.execute(query, params).fetchall()
-    return rows[:page_size], len(rows) > page_size
+    orders = [dict(r) for r in rows[:page_size]]
+    if orders:
+        marks = ', '.join('?' * len(orders))
+        lines = db.execute(f"""
+            SELECT oi.*, p.name AS product_name, p.sku AS product_sku
+            FROM order_items oi JOIN products p ON oi.product_id = p.id
+            WHERE oi.order_id IN ({marks}) ORDER BY oi.id
+        """, [o['id'] for o in orders]).fetchall()
+        by_order = {}
+        for line in lines:
+            by_order.setdefault(line['order_id'], []).append(dict(line))
+        for order in orders:
+            order['items'] = by_order.get(order['id'], [])
+    return orders, len(rows) > page_size
 
 
 def get_order(db, order_id):

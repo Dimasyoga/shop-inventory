@@ -156,6 +156,8 @@ TRANSLATIONS = {
         'Order cancelled': 'Pesanan dibatalkan',
         'Order ID {id}': 'Pesanan ID {id}',
         'No orders found': 'Tidak ada pesanan ditemukan',
+        'Page {n}': 'Halaman {n}',
+        'Invalid page': 'Halaman tidak valid',
         'Stock: {n}': 'Stok: {n}',
         'Available: {n}': 'Tersedia: {n}',
         'Held: {n}': 'Ditahan: {n}',

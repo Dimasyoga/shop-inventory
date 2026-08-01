@@ -47,6 +47,15 @@ bilingual (English / Bahasa Indonesia).
   `i18n.month_name` / `weekday_abbr`, never `strftime('%b')`. Bot config
   (language, whitelist, token, timezone, thresholds) is re-read every poll cycle,
   so web-UI changes apply with no restart.
+- **Lists are paged, and a page costs a fixed number of queries.** `list_orders`
+  returns `(orders, has_more)` where each order is a dict already carrying its `items`,
+  fetched for the whole page in one `IN` query — never one per row. `GET /api/orders`
+  returns `{orders, has_more, page}`, and a single order comes from
+  `GET /api/orders/<id>`: pulling the list and searching it client-side breaks the
+  moment the order is not on the page being held. Order by `created_at DESC, id DESC`,
+  not `created_at` alone — the column is second-resolution, and an unstable tiebreak
+  lets a row cross the page boundary between requests and be shown twice or skipped.
+  `tests/test_orders_pagination.py` pins the query count with sqlite3's trace hook.
 - **Indexes live in one `executescript` at the very end of `init_db()`**, after every
   migration, because several cover columns the `ALTER TABLE` blocks above add — build
   them earlier and an upgrade of an old database fails on a column that does not exist

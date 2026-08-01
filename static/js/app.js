@@ -309,17 +309,35 @@ function formatLocalDate(utcStr) {
     return new Date(utcStr.replace(' ', 'T') + 'Z').toLocaleString(DATE_LOCALE);
 }
 
-let orderItems = [];
+let ordersPage = 0;
+
+// Filtering changes what the pages contain, so staying on page 3 would land the
+// seller somewhere arbitrary -- or past the end of a shorter result.
+function reloadOrdersFromStart() {
+    ordersPage = 0;
+    loadOrders();
+}
+
+function goToOrdersPage(delta) {
+    ordersPage = Math.max(0, ordersPage + delta);
+    loadOrders();
+}
 
 function loadOrders() {
     const search = document.getElementById('searchOrder').value;
     const status = document.getElementById('filterStatus').value;
-    let url = '/api/orders?';
+    let url = '/api/orders?page=' + ordersPage + '&';
     if (search) url += 'search=' + encodeURIComponent(search) + '&';
     if (status) url += 'status=' + status + '&';
-    fetch(url).then(r => r.json()).then(orders => {
+    fetch(url).then(r => r.json()).then(data => {
+        const orders = data.orders || [];
         const tbody = document.getElementById('ordersBody');
+        renderOrdersPager(data.has_more, orders.length);
         if (!orders.length) {
+            // Landing on an empty page past the end is reachable by deleting the last
+            // draft on it; step back rather than showing "no orders found" over a
+            // list that does have some.
+            if (ordersPage > 0) return goToOrdersPage(-1);
             tbody.innerHTML = `<tr><td colspan="6" class="empty-row">${t('No orders found')}</td></tr>`;
             return;
         }
@@ -340,6 +358,23 @@ function loadOrders() {
             </tr>
         `).join('');
     });
+}
+
+// Hidden entirely on a single page of results: a pager offering nothing to page to
+// is just furniture. Page numbers are 1-based here and 0-based on the wire.
+function renderOrdersPager(hasMore, shown) {
+    const pager = document.getElementById('ordersPager');
+    if (!hasMore && ordersPage === 0) {
+        pager.innerHTML = '';
+        return;
+    }
+    pager.innerHTML = `
+        <button class="btn btn-secondary" onclick="goToOrdersPage(-1)"
+                ${ordersPage === 0 ? 'disabled' : ''}>${t('◀ Prev')}</button>
+        <span class="pager-label">${t('Page {n}', { n: ordersPage + 1 })}</span>
+        <button class="btn btn-secondary" onclick="goToOrdersPage(1)"
+                ${hasMore ? '' : 'disabled'}>${t('Next ▶')}</button>
+    `;
 }
 
 // Set while the modal is editing an existing draft; null while creating one.
@@ -367,9 +402,8 @@ function newOrder() {
 }
 
 function editOrder(id) {
-    fetch('/api/orders?').then(r => r.json()).then(orders => {
-        const o = orders.find(x => x.id === id);
-        if (!o) return;
+    fetch('/api/orders/' + id).then(r => r.json()).then(o => {
+        if (!o || o.error) return showToast(o && o.error ? o.error : t('Order not found'), 'error');
         refreshProducts().then(() => openOrderModal(o));
     });
 }
@@ -510,9 +544,8 @@ function cancelOrder(id) {
 }
 
 function viewOrder(id) {
-    fetch('/api/orders?').then(r => r.json()).then(orders => {
-        const o = orders.find(x => x.id === id);
-        if (!o) return;
+    fetch('/api/orders/' + id).then(r => r.json()).then(o => {
+        if (!o || o.error) return showToast(o && o.error ? o.error : t('Order not found'), 'error');
         document.getElementById('detailOrderId').textContent = t('Order ID {id}', { id: o.id });
         let html = `
             <p><strong>${t('Status')}:</strong> <span class="badge badge-${o.status}">${o.status === 'confirmed' ? t('Payment Confirmed') : t(o.status)}</span></p>

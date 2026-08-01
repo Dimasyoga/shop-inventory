@@ -472,51 +472,45 @@ def api_stock_adjust():
 @app.route('/orders')
 @login_required
 def orders_page():
-    status_filter = request.args.get('status', '')
-    search = request.args.get('search', '')
-    query = "SELECT * FROM orders WHERE 1=1"
-    params = []
-    if status_filter:
-        query += " AND status = ?"
-        params.append(status_filter)
-    if search:
-        query += " AND id LIKE ?"
-        params.append(f'%{search}%')
-    query += " ORDER BY created_at DESC"
-    orders = g.db.execute(query, params).fetchall()
+    # No orders are fetched here: the table is filled by loadOrders() against the API,
+    # which is where the paging lives. Rendering them server-side as well meant reading
+    # every order the shop had ever taken, on every page load, to throw them away.
     # The whole active catalogue, not just what is sellable today: the form hides rows
     # with nothing available, but a draft being edited must still be able to show the
     # product it is already holding. Same list shape the form refetches on open, so
     # what it filters does not depend on which of the two it got.
     products = g.db.execute(
         "SELECT * FROM products WHERE is_archived = 0 ORDER BY name").fetchall()
-    return render_template('orders.html', orders=orders, products_json=_products_json(products), format_rupiah=format_rupiah)
+    return render_template('orders.html', products_json=_products_json(products), format_rupiah=format_rupiah)
+
+# One screenful. The bot's list uses the same size, so an order sits on the same page
+# number whichever way the shop looks it up.
+ORDERS_PAGE_SIZE = 10
 
 @app.route('/api/orders', methods=['GET'])
 @login_required
 def api_orders():
-    status = request.args.get('status', '')
-    search = request.args.get('search', '')
-    query = "SELECT * FROM orders WHERE 1=1"
-    params = []
-    if status:
-        query += " AND status = ?"
-        params.append(status)
-    if search:
-        query += " AND id LIKE ?"
-        params.append(f'%{search}%')
-    query += " ORDER BY created_at DESC"
-    orders = g.db.execute(query, params).fetchall()
-    result = []
-    for o in orders:
-        items = g.db.execute("""
-            SELECT oi.*, p.name as product_name, p.sku as product_sku
-            FROM order_items oi
-            JOIN products p ON oi.product_id = p.id
-            WHERE oi.order_id = ?
-        """, (o['id'],)).fetchall()
-        result.append({**dict(o), 'items': [dict(i) for i in items]})
-    return jsonify(result)
+    page = _int_arg('page')
+    if page is None or page < 0:
+        return _err('Invalid page')
+    orders, has_more = services.list_orders(
+        g.db,
+        status=request.args.get('status') or None,
+        search=request.args.get('search') or None,
+        page=page, page_size=ORDERS_PAGE_SIZE)
+    return jsonify({'orders': orders, 'has_more': has_more, 'page': page})
+
+@app.route('/api/orders/<int:id>', methods=['GET'])
+@login_required
+def api_order(id):
+    """One order with its lines. The page used to find an order by pulling the whole
+    list and searching it client-side, which paging would have quietly broken -- an
+    order on page 3 is not in the array the page happens to be holding."""
+    try:
+        order, items = services.get_order(g.db, id)
+    except ServiceError as e:
+        return _service_error(e)
+    return jsonify({**dict(order), 'items': [dict(i) for i in items]})
 
 def _order_items_body():
     """Validated order lines from the request. Returns (items, error_response)."""

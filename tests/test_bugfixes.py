@@ -328,9 +328,9 @@ def test_cancelled_filter_and_dashboard_count(client, product, order):
     dropped = order([(pid, 1, 1000)], status="draft")
     client.post(f"/api/orders/{dropped}/cancel")
 
-    listed = client.get("/api/orders?status=cancelled").get_json()
+    listed = client.get("/api/orders?status=cancelled").get_json()["orders"]
     assert [o["id"] for o in listed] == [dropped]
-    drafts = client.get("/api/orders?status=draft").get_json()
+    drafts = client.get("/api/orders?status=draft").get_json()["orders"]
     assert dropped not in [o["id"] for o in drafts]
 
     html = client.get("/").get_data(as_text=True)

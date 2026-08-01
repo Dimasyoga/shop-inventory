@@ -225,8 +225,10 @@ The server starts at `http://localhost:5000`. Default login: **admin** / **admin
 
 #### Orders (`/orders`)
 - Search by order number, filter by status
+- Ten orders per page, newest first; **◀ Prev** / **Next ▶** appear once there is more
+  than one page. Searching or changing the status filter returns to page 1
 - Create orders by selecting products and quantities
-- View order details in a modal
+- View order details in a modal, or ✏️ to correct a draft
 - 3-step lifecycle: draft → confirmed (payment) → completed (stock deducted)
 - Cancel orders (except completed ones)
 
