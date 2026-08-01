@@ -99,7 +99,7 @@ def restock_batches(db, start, end):
     date_filter, params = build_date_filter(start, end, 'rb.created_at')
     rows = db.execute("""
         SELECT rb.id, rb.created_at, rb.subtotal_cost, rb.discount, rb.shipping_cost,
-               rb.admin_fee, rb.total_cost,
+               rb.admin_fee, rb.total_cost, rb.voids_batch_id,
                ri.qty_added, ri.unit_price, ri.unit_cost, ri.allocated_cost,
                p.name AS product_name, p.sku AS product_sku
         FROM restock_batches rb
@@ -108,7 +108,7 @@ def restock_batches(db, start, end):
         WHERE 1=1
     """ + date_filter + " ORDER BY rb.created_at, rb.id, ri.id", params).fetchall()
     return _group(rows, ('id', 'created_at', 'subtotal_cost', 'discount', 'shipping_cost',
-                         'admin_fee', 'total_cost'),
+                         'admin_fee', 'total_cost', 'voids_batch_id'),
                   ('qty_added', 'unit_price', 'unit_cost', 'allocated_cost'))
 
 
@@ -116,7 +116,7 @@ def self_use_batches(db, start, end):
     """Self-use batches in the window, each with its line items."""
     date_filter, params = build_date_filter(start, end, 'sb.created_at')
     rows = db.execute("""
-        SELECT sb.id, sb.created_at, sb.total_value,
+        SELECT sb.id, sb.created_at, sb.total_value, sb.voids_batch_id,
                su.quantity, su.unit_price, su.subtotal,
                p.name AS product_name, p.sku AS product_sku
         FROM self_use_batches sb
@@ -124,7 +124,7 @@ def self_use_batches(db, start, end):
         LEFT JOIN products p ON p.id = su.product_id
         WHERE 1=1
     """ + date_filter + " ORDER BY sb.created_at, sb.id, su.id", params).fetchall()
-    return _group(rows, ('id', 'created_at', 'total_value'),
+    return _group(rows, ('id', 'created_at', 'total_value', 'voids_batch_id'),
                   ('quantity', 'unit_price', 'subtotal'))
 
 
@@ -356,9 +356,20 @@ def _sales_section(pdf, data, t):
         empty_text=t('No records for this month'))
 
 
+def _batch_label(batch):
+    """`45/42` for a void of batch 42, otherwise the plain batch number.
+
+    A void carries negated figures, so it already reads as a credit; the notation is what
+    says which entry it takes back. Explained in each section's note.
+    """
+    if batch['voids_batch_id']:
+        return f"{batch['id']}/{batch['voids_batch_id']}"
+    return str(batch['id'])
+
+
 def _restock_section(pdf, data, t):
     tz = data['tz']
-    rows = [(b['id'], _local(b['created_at'], tz), it['product_name'] or '—',
+    rows = [(_batch_label(b), _local(b['created_at'], tz), it['product_name'] or '—',
              it['product_sku'] or '—', it['qty_added'],
              format_rupiah(it['unit_price']), format_rupiah(it['unit_cost']),
              format_rupiah(it['allocated_cost']))
@@ -366,10 +377,10 @@ def _restock_section(pdf, data, t):
     cost = sum(b['total_cost'] for b in data['restocks'])
     _record_section(
         pdf, t('Restock Records'),
-        t('One row per product restocked. Unit price is what the supplier invoice listed; unit cost adds that line’s share of the invoice discount, shipping and bank fee, split in proportion to line value. Landed cost is unit cost times quantity, and the lines of a batch sum to what was paid.'),
+        t('One row per product restocked. Unit price is what the supplier invoice listed; unit cost adds that line’s share of the invoice discount, shipping and bank fee, split in proportion to line value. Landed cost is unit cost times quantity, and the lines of a batch sum to what was paid. A batch numbered 45/42 is a void: it reverses batch 42, and its negative figures cancel that entry out.'),
         [t('Batch'), t('Date'), t('Product'), t('SKU'), t('Qty Added'), t('Unit Price'),
          t('Unit Cost'), t('Landed Cost')],
-        widths=(12, 24, 44, 24, 18, 24, 24, 26),
+        widths=(18, 24, 44, 18, 18, 24, 24, 26),
         align=('RIGHT', 'LEFT', 'LEFT', 'LEFT', 'RIGHT', 'RIGHT', 'RIGHT', 'RIGHT'),
         rows=rows,
         total_row=t('Batches: {n} — total {amount}',
@@ -379,16 +390,16 @@ def _restock_section(pdf, data, t):
 
 def _self_use_section(pdf, data, t):
     tz = data['tz']
-    rows = [(b['id'], _local(b['created_at'], tz), it['product_name'] or '—',
+    rows = [(_batch_label(b), _local(b['created_at'], tz), it['product_name'] or '—',
              it['product_sku'] or '—', it['quantity'],
              format_rupiah(it['unit_price']), format_rupiah(it['subtotal']))
             for b in data['self_uses'] for it in b['items']]
     value = sum(b['total_value'] for b in data['self_uses'])
     _record_section(
         pdf, t('Self Use Records'),
-        t('One row per product taken by the seller, valued at the retail price at the time of entry. No revenue, and not deducted from net profit.'),
+        t('One row per product taken by the seller, valued at the retail price at the time of entry. No revenue, and not deducted from net profit. A batch numbered 45/42 is a void: it reverses batch 42, putting that stock back.'),
         [t('Batch'), t('Date'), t('Product'), t('SKU'), t('Qty'), t('Unit Price'), t('Subtotal')],
-        widths=(14, 26, 51, 26, 11, 26, 27),
+        widths=(20, 26, 51, 20, 11, 26, 27),
         align=('RIGHT', 'LEFT', 'LEFT', 'LEFT', 'RIGHT', 'RIGHT', 'RIGHT'),
         rows=rows,
         total_row=t('Batches: {n} — total {amount}',

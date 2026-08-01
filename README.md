@@ -18,6 +18,7 @@ A Flask-based shop inventory management system built with Python 3.13, SQLite, a
 - Order management with lifecycle: draft → confirmed → completed (or cancelled)
 - Invoice-based restock: a price per product plus batch discount, shipping and bank
   fee, allocated into a per-unit landed cost
+- Void a mistyped restock or self-use batch, reversing stock and money (see below)
 - Self-use tracking for stock the seller takes for themself (no revenue)
 - Sales dashboard with period-based analytics and trend charts
 - Monthly PDF audit report, archived on the server and pushed to Telegram (see below)
@@ -153,7 +154,9 @@ pip install -r requirements.txt
 The database is created automatically on first run. `database.py` handles:
 - Creating all tables if they don't exist
 - Migrating new tables (`restock_batches`, `restock_items`, `self_use_batches`,
-  `self_use_items`) and new columns (per-product cost tracking) to existing databases
+  `self_use_items`) and new columns (per-product cost tracking, batch voiding) to
+  existing databases. Restock lines that predate voiding carry no cost snapshot, so
+  voiding one flags the product for review rather than restoring a cost of zero
 - Seeding the first user (`admin` / `admin123`, or `SHOP_ADMIN_USERNAME` /
   `SHOP_ADMIN_PASSWORD` if set — only ever on an empty database)
 
@@ -169,13 +172,13 @@ The database is created automatically on first run. `database.py` handles:
 | Table | Purpose |
 |---|---|
 | `users` | Authentication (username, password) |
-| `products` | Product catalog (SKU, sale price, cost price, stock, threshold) |
+| `products` | Product catalog (SKU, sale price, cost price, stock, threshold, cost-review flag) |
 | `stock_logs` | Stock adjustment audit trail |
 | `orders` | Order header (status, total) |
 | `order_items` | Order line items (price and cost snapshot per line) |
-| `restock_batches` | Restock batch header (invoice subtotal, discount, shipping, admin fee, total paid) |
-| `restock_items` | Restock line items (product, qty, invoice unit price, landed unit cost, line cost) |
-| `self_use_batches` | Self-use batch header (total retail value per batch) |
+| `restock_batches` | Restock batch header (invoice subtotal, discount, shipping, admin fee, total paid, void link) |
+| `restock_items` | Restock line items (product, qty, invoice unit price, landed unit cost, line cost, pre-batch cost snapshot) |
+| `self_use_batches` | Self-use batch header (total retail value per batch, void link) |
 | `self_use_items` | Self-use line items (product, qty, price snapshot, subtotal) |
 
 ---
@@ -206,6 +209,10 @@ The server starts at `http://localhost:5000`. Default login: **admin** / **admin
 #### Products (`/products`)
 - Search by name/SKU
 - Add/edit products with name, SKU, price, stock qty, reorder threshold
+- **Needs cost** filter chip: the products holding the profit figures back — no cost
+  recorded on stock that is actually there, or a cost a voided restock left in doubt.
+  The Cost Price column tells the two apart, and the uncosted-sales notes on the
+  dashboard and sales page link straight into this filtered view
 - Stock adjustment modal for manual corrections (shows warning about cost accuracy)
 - Archive products (soft delete) instead of permanent deletion
 
@@ -225,7 +232,35 @@ The server starts at `http://localhost:5000`. Default login: **admin** / **admin
 - Each product's `cost_price` rolls forward as a **weighted average** of the stock on hand
   and the incoming batch, so a supplier price rise does not revalue stock already paid for
 - Expandable history: click a batch row to see the per-unit costs and charge breakdown
+- **Void** (↩️ in the history) reverses a batch entered by mistake — see *Voiding a
+  batch* below
 - Period filter: Today, This Week, This Month, All Time
+
+#### Voiding a batch
+
+A restock or self-use batch entered by mistake is **voided**, not edited: the system
+writes a second batch carrying the negated figures and links the two. Both stay in the
+history and in the audit report, because an audit wants the mistake and the correction,
+not a silent gap. Re-enter the invoice correctly afterwards.
+
+- **Stock has to still be there.** Ten restocked and eight already sold leaves nothing to
+  reverse, so the void is refused whole rather than driving stock negative. Restock the
+  difference first, or leave the batch alone
+- **A closed month keeps the figures it printed.** The credit falls in the month the
+  correction was made, so a report already archived and sent to Telegram stays true. A
+  mistake caught in the same month simply nets out
+- **Cost is restored when that is exact.** Each restock line records the product's
+  `cost_price` as it stood immediately before, and voiding puts it back — unless a later
+  restock has already averaged onto it. Then the original is genuinely unrecoverable
+  (rebuilding the weighted average needs stock levels that sales have since moved), so
+  the product is flagged **Needs cost** for a human to check against the invoice instead
+  of being given an invented figure
+- **Sales already made are not rewritten.** A sale snapshots its cost when the order is
+  created and that never changes; the void reports how many completed sales carry the
+  voided cost so you know which window is affected
+- Self use has the same action and much less to do: no cost is involved, so voiding just
+  puts the stock back
+- A void cannot itself be voided, and a batch cannot be voided twice
 
 #### Self Use (`/self-use`)
 - Records stock the seller takes for themself: one product or several per batch
@@ -263,7 +298,8 @@ A PDF for one calendar month, for audit:
 - **Sales Records** — every completed order, one row per product sold, with unit
   price and subtotal
 - **Restock Records** — every batch, one row per product, with invoice unit price,
-  landed unit cost and line cost
+  landed unit cost and line cost. A batch numbered `45/42` is a void reversing batch 42,
+  and its negative figures cancel that entry out
 - **Self Use Records** — every batch, one row per product, at the recorded price
 - **Products With No Sales** — appendix listing every active product that sold
   nothing that month and the stock value sitting in it
@@ -566,5 +602,7 @@ it, every sale from that stock is permanently uncosted and invisible to the prof
 |---|---|---|---|
 | Order completed | ↓ | Revenue (`orders.total_amount`) | Yes, as revenue |
 | Restock | ↑ | Total paid (`restock_batches.total_cost`) | Yes, subtracted |
+| Restock voided | ↓ | Negated total, dated when voided | Yes, added back |
 | Self use | ↓ | Retail value (`self_use_batches.total_value`) | **No** — reported separately |
+| Self use voided | ↑ | Negated value, dated when voided | **No** |
 | Stock adjust | ↕ | none | No |

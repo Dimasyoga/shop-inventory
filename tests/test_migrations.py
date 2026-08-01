@@ -231,3 +231,39 @@ def test_a_fresh_database_never_creates_categories(db_path):
         db_path, "SELECT name FROM sqlite_master WHERE type='table'")}
     assert "categories" not in tables
     assert "products" in tables
+
+
+# --- Voiding, on a database that predates it ---
+
+def test_the_void_columns_are_added_to_an_old_database(legacy_db):
+    batch_cols = {r["name"] for r in query(legacy_db, "PRAGMA table_info(restock_batches)")}
+    item_cols = {r["name"] for r in query(legacy_db, "PRAGMA table_info(restock_items)")}
+    self_use_cols = {r["name"] for r in query(legacy_db, "PRAGMA table_info(self_use_batches)")}
+    assert "voids_batch_id" in batch_cols
+    assert "voids_batch_id" in self_use_cols
+    assert "cost_before" in item_cols
+
+
+def test_old_restock_lines_have_no_cost_snapshot(legacy_db):
+    """0 across the board -- these rows were written before the column existed."""
+    assert {r["cost_before"] for r in query(legacy_db, "SELECT cost_before FROM restock_items")} \
+        == {0.0}
+
+
+def test_an_old_batch_is_still_voidable_and_takes_the_flag_path(legacy_db, monkeypatch):
+    """No snapshot to restore from, and an earlier batch behind it, so the cost is doubted
+    rather than zeroed -- and the reversal of stock and money still happens in full."""
+    monkeypatch.setattr(database, "DB_PATH", legacy_db)
+    import services
+    conn = database.get_db()
+    try:
+        # Batch 2 restocked Kopi (id 7) alone; batch 1 is earlier and also holds Kopi.
+        result = services.void_restock(conn, 2)
+    finally:
+        conn.close()
+
+    assert result["flagged"] == ["Kopi"]
+    assert result["restored"] == []
+    assert query(legacy_db, "SELECT stock_qty, cost_review_needed FROM products WHERE id = 7") == [
+        {"stock_qty": 98, "cost_review_needed": 1}]
+    assert query(legacy_db, "SELECT SUM(total_cost) AS t FROM restock_batches") == [{"t": 60000.0}]

@@ -317,15 +317,168 @@ def create_restock(db, items, discount=0, shipping_cost=0, admin_fee=0):
             "UPDATE products SET stock_qty = stock_qty + ?, cost_price = ?,"
             " updated_at = CURRENT_TIMESTAMP WHERE id = ?",
             (line['qty'], cost_price, product_id))
+        # cost_before is the pre-blend figure this line overwrote: the only exact way
+        # back if the batch is later voided (see void_restock).
         db.execute(
             "INSERT INTO restock_items (batch_id, product_id, qty_added, unit_price, unit_cost,"
-            " allocated_cost) VALUES (?, ?, ?, ?, ?, ?)",
+            " allocated_cost, cost_before) VALUES (?, ?, ?, ?, ?, ?, ?)",
             (batch_id, product_id, line['qty'], line['unit_price'], line['unit_cost'],
-             line['line_cost']))
+             line['line_cost'], product['cost_price']))
         db.execute("INSERT INTO stock_logs (product_id, change_qty, reason) VALUES (?, ?, ?)",
                    (product_id, line['qty'], f'restock batch #{batch_id}'))
     db.commit()
     return {'batch_id': batch_id, 'subtotal': subtotal, 'total_cost': total_cost}
+
+
+def _voidable_batch(db, table, batch_id):
+    """The batch, if it can be voided at all. `table` is a literal from this module.
+
+    Three refusals, all of them about keeping the reversal one-to-one: a batch that does
+    not exist, one that is itself a void (reversing a reversal is just the original
+    again, entered by hand), and one already voided (which would take the stock out
+    twice).
+    """
+    batch = db.execute(f"SELECT * FROM {table} WHERE id = ?", (batch_id,)).fetchone()
+    if not batch:
+        raise NotFoundError('Batch #{id} not found', id=batch_id)
+    if batch['voids_batch_id']:
+        raise ServiceError('Batch #{id} is itself a void and cannot be voided', id=batch_id)
+    existing = db.execute(
+        f"SELECT id FROM {table} WHERE voids_batch_id = ?", (batch_id,)).fetchone()
+    if existing:
+        raise ServiceError('Batch #{id} was already voided by batch #{void_id}',
+                           id=batch_id, void_id=existing['id'])
+    return batch
+
+
+def void_restock(db, batch_id):
+    """Reverse a restock batch that should not have been entered, and repair the cost.
+
+    A void is a batch of its own carrying the negated figures, not an edit of the
+    original: restock spend stays append-only, so a month already reported keeps the
+    total it printed and the credit falls in the month the correction was made.
+
+    The stock has to still be there. Ten restocked and eight already sold leaves nothing
+    to reverse, so the whole void is refused rather than driving stock negative -- the
+    same all-or-nothing rule create_self_use applies.
+
+    cost_price is restored from the cost_before snapshot when that is exact, which means
+    when no later surviving batch has already blended onto it. When one has, the honest
+    answer is that the original figure is unrecoverable: the average would have to be
+    rebuilt from stock levels that sales have since moved. Those products are flagged
+    cost_review_needed instead, and the products page asks for a human to look.
+
+    Sale lines keep the unit_cost they snapshotted, per the rule that a snapshot is never
+    rewritten -- `affected_sales` reports how many carry the voided cost.
+
+    Returns {'void_batch_id', 'total_cost', 'restored', 'flagged', 'affected_sales'},
+    where restored/flagged are product names.
+    """
+    batch = _voidable_batch(db, 'restock_batches', batch_id)
+    lines = db.execute("""
+        SELECT ri.*, p.name AS product_name
+        FROM restock_items ri JOIN products p ON ri.product_id = p.id
+        WHERE ri.batch_id = ? ORDER BY ri.id
+    """, (batch_id,)).fetchall()
+
+    cur = db.execute(
+        "INSERT INTO restock_batches (subtotal_cost, discount, shipping_cost, admin_fee,"
+        " total_cost, voids_batch_id) VALUES (?, ?, ?, ?, ?, ?)",
+        (-batch['subtotal_cost'], -batch['discount'], -batch['shipping_cost'],
+         -batch['admin_fee'], -batch['total_cost'], batch_id))
+    void_id = cur.lastrowid
+
+    for line in lines:
+        # Conditional decrement, as in complete_order: atomic, and its failure is the
+        # check that the goods have not already left the shop.
+        cur = db.execute(
+            "UPDATE products SET stock_qty = stock_qty - ?, updated_at = CURRENT_TIMESTAMP"
+            " WHERE id = ? AND stock_qty >= ?",
+            (line['qty_added'], line['product_id'], line['qty_added']))
+        if cur.rowcount == 0:
+            db.rollback()
+            raise ServiceError(
+                'Cannot void: {name} no longer has the {qty} restocked by this batch in stock',
+                name=line['product_name'], qty=line['qty_added'])
+        # The mirrored line carries no cost_before of its own: a void is never voided,
+        # so nothing will ever read it.
+        db.execute(
+            "INSERT INTO restock_items (batch_id, product_id, qty_added, unit_price, unit_cost,"
+            " allocated_cost, cost_before) VALUES (?, ?, ?, ?, ?, ?, 0)",
+            (void_id, line['product_id'], -line['qty_added'], line['unit_price'],
+             line['unit_cost'], -line['allocated_cost']))
+        db.execute("INSERT INTO stock_logs (product_id, change_qty, reason) VALUES (?, ?, ?)",
+                   (line['product_id'], -line['qty_added'], f'void of restock batch #{batch_id}'))
+
+    restored, flagged, flagged_ids = [], [], []
+    # dict.fromkeys keeps first-seen order: a batch may list a product twice, and only
+    # the first line's snapshot describes the state before the batch as a whole.
+    for product_id in dict.fromkeys(line['product_id'] for line in lines):
+        first = next(l for l in lines if l['product_id'] == product_id)
+        if _blended_since(db, product_id, batch_id):
+            flagged.append(first['product_name'])
+            flagged_ids.append(product_id)
+        elif first['cost_before'] > 0 or not _restocked_before(db, product_id, batch_id):
+            # Either a real snapshot, or this was the product's first restock and the
+            # cost genuinely goes back to unknown. A 0 with earlier batches behind it is
+            # a row from before cost_before existed, which is not a snapshot at all.
+            db.execute("UPDATE products SET cost_price = ?, updated_at = CURRENT_TIMESTAMP"
+                       " WHERE id = ?", (first['cost_before'], product_id))
+            restored.append(first['product_name'])
+        else:
+            flagged.append(first['product_name'])
+            flagged_ids.append(product_id)
+
+    product_ids = [line['product_id'] for line in lines]
+    if flagged_ids:
+        marks = ', '.join('?' * len(flagged_ids))
+        db.execute(f"UPDATE products SET cost_review_needed = 1,"
+                   f" updated_at = CURRENT_TIMESTAMP WHERE id IN ({marks})", tuple(flagged_ids))
+    affected_sales = _sales_since(db, product_ids, batch['created_at'])
+    db.commit()
+    return {'void_batch_id': void_id, 'total_cost': -batch['total_cost'],
+            'restored': restored, 'flagged': flagged, 'affected_sales': affected_sales}
+
+
+def _surviving_restock_lines(compare):
+    """Restock lines for one product, on batches that still stand, `compare` this one.
+
+    A void batch never counts, and neither does a batch that has since been voided --
+    both describe stock movements that no longer apply.
+    """
+    return f"""
+        SELECT 1 FROM restock_items ri
+        JOIN restock_batches rb ON ri.batch_id = rb.id
+        WHERE ri.product_id = ? AND ri.batch_id {compare} ?
+          AND rb.voids_batch_id IS NULL
+          AND NOT EXISTS (SELECT 1 FROM restock_batches v WHERE v.voids_batch_id = rb.id)
+        LIMIT 1
+    """
+
+
+def _blended_since(db, product_id, batch_id):
+    """Has a later surviving batch already averaged onto this product's cost?"""
+    return db.execute(_surviving_restock_lines('>'), (product_id, batch_id)).fetchone() is not None
+
+
+def _restocked_before(db, product_id, batch_id):
+    return db.execute(_surviving_restock_lines('<'), (product_id, batch_id)).fetchone() is not None
+
+
+def _sales_since(db, product_ids, since):
+    """Completed sale lines for these products dated on or after `since`.
+
+    They snapshotted whatever cost was live at the time, and a void does not rewrite
+    them -- this is how many the shop owner should know are affected.
+    """
+    if not product_ids:
+        return 0
+    marks = ', '.join('?' * len(product_ids))
+    return db.execute(f"""
+        SELECT COUNT(*) AS n FROM order_items oi
+        JOIN orders o ON oi.order_id = o.id
+        WHERE o.status = 'completed' AND oi.product_id IN ({marks}) AND o.created_at >= ?
+    """, tuple(product_ids) + (since,)).fetchone()['n']
 
 
 # --- Self use ---
@@ -379,6 +532,36 @@ def create_self_use(db, items):
                    (product_id, -qty, f'self use batch #{batch_id}'))
     db.commit()
     return {'batch_id': batch_id, 'total_value': total_value}
+
+
+def void_self_use(db, batch_id):
+    """Reverse a self-use batch, putting the stock back.
+
+    The same reversing-batch shape as void_restock and much less to do: self use touches
+    no cost, so there is nothing to restore and nothing to flag. Stock going back in
+    needs no guard either -- the only way to fail is the batch itself being unvoidable.
+
+    Returns {'void_batch_id', 'total_value'}.
+    """
+    batch = _voidable_batch(db, 'self_use_batches', batch_id)
+    lines = db.execute("SELECT * FROM self_use_items WHERE batch_id = ? ORDER BY id",
+                       (batch_id,)).fetchall()
+
+    cur = db.execute("INSERT INTO self_use_batches (total_value, voids_batch_id) VALUES (?, ?)",
+                     (-batch['total_value'], batch_id))
+    void_id = cur.lastrowid
+    for line in lines:
+        db.execute("UPDATE products SET stock_qty = stock_qty + ?,"
+                   " updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                   (line['quantity'], line['product_id']))
+        db.execute("INSERT INTO self_use_items (batch_id, product_id, quantity, unit_price,"
+                   " subtotal) VALUES (?, ?, ?, ?, ?)",
+                   (void_id, line['product_id'], -line['quantity'], line['unit_price'],
+                    -line['subtotal']))
+        db.execute("INSERT INTO stock_logs (product_id, change_qty, reason) VALUES (?, ?, ?)",
+                   (line['product_id'], line['quantity'], f'void of self use batch #{batch_id}'))
+    db.commit()
+    return {'void_batch_id': void_id, 'total_value': -batch['total_value']}
 
 
 # --- Sales summary ---

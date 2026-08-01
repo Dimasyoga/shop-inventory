@@ -734,17 +734,68 @@ function submitRestock() {
     });
 }
 
+/* A batch reads three ways in the history: ordinary and voidable, the void itself, or
+   the original a void has since reversed. Restock and self use render them identically,
+   so the label and the action cell are built once here. */
+function batchLabel(b) {
+    if (b.voids_batch_id) return t('Void of #{id}', { id: b.voids_batch_id });
+    if (b.voided_by) return `${t('Batch #{id}', { id: b.id })} — ${t('voided')}`;
+    return t('Batch #{id}', { id: b.id });
+}
+
+function voidCell(b, fn) {
+    if (b.voids_batch_id || b.voided_by) return '<td></td>';
+    // stopPropagation: the row itself toggles the detail panel underneath.
+    return `<td class="action-cell"><button class="btn-icon" title="${t('Void')}"
+        onclick="event.stopPropagation(); ${fn}(${b.id})">↩️</button></td>`;
+}
+
+function voidRowClass(b) {
+    return b.voids_batch_id || b.voided_by ? ' batch-void' : '';
+}
+
+function voidRestock(id) {
+    if (!confirm(t('Void batch #{id}? The stock it added comes back out and the invoice is reversed.', { id }))) return;
+    fetchJson(`/api/restock/${id}/void`, { method: 'POST' })
+        .then(r => {
+            showToast(t('Batch #{id} voided', { id }), 'success');
+            // Say what the void could and could not repair, rather than leaving the
+            // shop owner to discover it on the products page.
+            if (r.flagged.length) {
+                showToast(t('Cost left in doubt for: {names} — a later restock had already averaged onto it',
+                            { names: r.flagged.join(', ') }), 'error');
+            }
+            if (r.affected_sales) {
+                showToast(t('{n} completed sale(s) already recorded the old cost and are unchanged',
+                            { n: r.affected_sales }), 'error');
+            }
+            loadRestockHistory();
+        })
+        .catch(err => showToast(err.message, 'error'));
+}
+
+function voidSelfUse(id) {
+    if (!confirm(t('Void batch #{id}? The stock it took out goes back in.', { id }))) return;
+    fetchJson(`/api/self-use/${id}/void`, { method: 'POST' })
+        .then(() => {
+            showToast(t('Batch #{id} voided', { id }), 'success');
+            loadSelfUseHistory();
+        })
+        .catch(err => showToast(err.message, 'error'));
+}
+
 function loadRestockHistory() {
     fetchJson(`/api/restock/history?period=${restockPeriod}&tz=${encodeURIComponent(CLIENT_TZ)}`)
         .then(d => {
             const tbody = document.getElementById('restockHistoryBody');
             if (!d.length) {
-                tbody.innerHTML = `<tr><td colspan="4" class="empty-row">${t('No restock history yet')}</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="5" class="empty-row">${t('No restock history yet')}</td></tr>`;
                 return;
             }
             tbody.innerHTML = d.map(b => {
+                // A void's lines are negated, so the sign comes from the value, not a literal.
                 const productList = b.items.map(i =>
-                    `${escapeHtml(i.product_name)} (${escapeHtml(i.product_sku || '-')}): +${i.qty_added} × ${formatRupiah(i.unit_cost)} = ${formatRupiah(i.allocated_cost)}`
+                    `${escapeHtml(i.product_name)} (${escapeHtml(i.product_sku || '-')}): ${i.qty_added > 0 ? '+' : '−'}${Math.abs(i.qty_added)} × ${formatRupiah(i.unit_cost)} = ${formatRupiah(i.allocated_cost)}`
                 ).join('<br>');
                 // The charge lines are what turn a listed price into the landed cost above,
                 // so the breakdown has to be readable back from the history.
@@ -754,14 +805,15 @@ function loadRestockHistory() {
                 if (b.admin_fee) charges.push(`${t('Admin Fee')}: +${formatRupiah(b.admin_fee)}`);
                 const detail = `${productList}<br><span style="color:#888">${charges.join(' &nbsp;·&nbsp; ')}</span>`;
                 return `
-                    <tr class="restock-batch-row" onclick="const d = this.nextElementSibling; d.style.display = d.style.display === 'none' ? '' : 'none'">
-                        <td>${t('Batch #{id}', { id: b.id })}</td>
+                    <tr class="restock-batch-row${voidRowClass(b)}" onclick="const d = this.nextElementSibling; d.style.display = d.style.display === 'none' ? '' : 'none'">
+                        <td>${batchLabel(b)}</td>
                         <td>${t('{n} products', { n: b.items.length })}</td>
                         <td>${formatRupiah(b.total_cost)}</td>
                         <td>${formatLocalDate(b.created_at)}</td>
+                        ${voidCell(b, 'voidRestock')}
                     </tr>
                     <tr class="restock-detail-row" style="display:none">
-                        <td colspan="4" style="background:#f8f9ff;padding:12px 16px;font-size:13px;color:#555">
+                        <td colspan="5" style="background:#f8f9ff;padding:12px 16px;font-size:13px;color:#555">
                             ${detail}
                         </td>
                     </tr>
@@ -833,20 +885,21 @@ function loadSelfUseHistory() {
         .then(d => {
             const tbody = document.getElementById('selfUseHistoryBody');
             if (!d.length) {
-                tbody.innerHTML = `<tr><td colspan="4" class="empty-row">${t('No self use history yet')}</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="5" class="empty-row">${t('No self use history yet')}</td></tr>`;
                 return;
             }
             tbody.innerHTML = d.map(b => {
-                const productList = b.items.map(i => `${escapeHtml(i.product_name)} (${escapeHtml(i.product_sku || '-')}): -${i.quantity}`).join('<br>');
+                const productList = b.items.map(i => `${escapeHtml(i.product_name)} (${escapeHtml(i.product_sku || '-')}): ${i.quantity > 0 ? '-' : '+'}${Math.abs(i.quantity)}`).join('<br>');
                 return `
-                    <tr class="self-use-batch-row" onclick="const d = this.nextElementSibling; d.style.display = d.style.display === 'none' ? '' : 'none'">
-                        <td>${t('Batch #{id}', { id: b.id })}</td>
+                    <tr class="self-use-batch-row${voidRowClass(b)}" onclick="const d = this.nextElementSibling; d.style.display = d.style.display === 'none' ? '' : 'none'">
+                        <td>${batchLabel(b)}</td>
                         <td>${t('{n} products', { n: b.items.length })}</td>
                         <td>${formatRupiah(b.total_value)}</td>
                         <td>${formatLocalDate(b.created_at)}</td>
+                        ${voidCell(b, 'voidSelfUse')}
                     </tr>
                     <tr class="self-use-detail-row" style="display:none">
-                        <td colspan="4" style="background:#f8f9ff;padding:12px 16px;font-size:13px;color:#555">
+                        <td colspan="5" style="background:#f8f9ff;padding:12px 16px;font-size:13px;color:#555">
                             ${productList}
                         </td>
                     </tr>

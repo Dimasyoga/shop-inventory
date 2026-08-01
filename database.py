@@ -184,6 +184,7 @@ def init_db():
             shipping_cost REAL NOT NULL DEFAULT 0,
             admin_fee REAL NOT NULL DEFAULT 0,
             total_cost REAL NOT NULL DEFAULT 0,
+            voids_batch_id INTEGER,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
@@ -195,6 +196,7 @@ def init_db():
             unit_price REAL NOT NULL DEFAULT 0,
             unit_cost REAL NOT NULL DEFAULT 0,
             allocated_cost REAL NOT NULL DEFAULT 0,
+            cost_before REAL NOT NULL DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (batch_id) REFERENCES restock_batches(id),
             FOREIGN KEY (product_id) REFERENCES products(id)
@@ -203,6 +205,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS self_use_batches (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             total_value REAL NOT NULL DEFAULT 0,
+            voids_batch_id INTEGER,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
@@ -373,6 +376,29 @@ def init_db():
     product_cols = [r[1] for r in c.execute("PRAGMA table_info(products)").fetchall()]
     if 'cost_review_needed' not in product_cols:
         c.execute("ALTER TABLE products ADD COLUMN cost_review_needed INTEGER NOT NULL DEFAULT 0")
+
+    # Migrate: let a mistyped restock or self-use batch be voided. A void is a batch of
+    # its own that reverses another rather than an edit of it, so restock spend stays
+    # append-only and a month that was already reported keeps the figures it printed --
+    # the credit lands in the month the correction was actually made.
+    #
+    # One column carries both halves of the relationship: a batch IS a void when its
+    # voids_batch_id is set, and HAS BEEN voided when another batch points at it.
+    batch_cols = [r[1] for r in c.execute("PRAGMA table_info(restock_batches)").fetchall()]
+    if 'voids_batch_id' not in batch_cols:
+        c.execute("ALTER TABLE restock_batches ADD COLUMN voids_batch_id INTEGER")
+    self_use_cols = [r[1] for r in c.execute("PRAGMA table_info(self_use_batches)").fetchall()]
+    if 'voids_batch_id' not in self_use_cols:
+        c.execute("ALTER TABLE self_use_batches ADD COLUMN voids_batch_id INTEGER")
+
+    # The product's cost_price as it stood immediately before this line was applied.
+    # Voiding restores it, which is the only way to undo a weighted average exactly --
+    # recomputing one needs the stock level at the time, and sales since have moved it.
+    # Lines written before this ships keep 0, which reads as "no snapshot" and sends the
+    # void down the flag-for-review path rather than restoring a cost of zero.
+    restock_item_cols = [r[1] for r in c.execute("PRAGMA table_info(restock_items)").fetchall()]
+    if 'cost_before' not in restock_item_cols:
+        c.execute("ALTER TABLE restock_items ADD COLUMN cost_before REAL NOT NULL DEFAULT 0")
 
     # Seed the first user. Credentials come from the environment so a deployment
     # never has to ship with the documented default; changing them later has no

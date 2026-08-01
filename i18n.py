@@ -169,6 +169,27 @@ TRANSLATIONS = {
         'Batch #{id}': 'Batch #{id}',
         '{n} products': '{n} produk',
 
+        # --- Voiding a batch ---
+        'Void': 'Batalkan',
+        'voided': 'dibatalkan',
+        'Void of #{id}': 'Pembatalan #{id}',
+        'Batch #{id} voided': 'Batch #{id} dibatalkan',
+        'Void batch #{id}? The stock it added comes back out and the invoice is reversed.':
+            'Batalkan batch #{id}? Stok yang ditambahkan akan dikeluarkan kembali dan faktur dibalik.',
+        'Void batch #{id}? The stock it took out goes back in.':
+            'Batalkan batch #{id}? Stok yang dikeluarkan akan dikembalikan.',
+        'Cost left in doubt for: {names} — a later restock had already averaged onto it':
+            'Harga modal diragukan untuk: {names} — restok berikutnya sudah terlanjur dirata-ratakan di atasnya',
+        '{n} completed sale(s) already recorded the old cost and are unchanged':
+            '{n} penjualan selesai sudah mencatat harga modal lama dan tidak diubah',
+        'Batch #{id} not found': 'Batch #{id} tidak ditemukan',
+        'Batch #{id} is itself a void and cannot be voided':
+            'Batch #{id} adalah pembatalan dan tidak dapat dibatalkan lagi',
+        'Batch #{id} was already voided by batch #{void_id}':
+            'Batch #{id} sudah dibatalkan oleh batch #{void_id}',
+        'Cannot void: {name} no longer has the {qty} restocked by this batch in stock':
+            'Tidak dapat dibatalkan: stok {name} tidak lagi memiliki {qty} yang ditambahkan batch ini',
+
         # --- Self use ---
         'New Self Use': 'Pemakaian Sendiri Baru',
         'Submit Self Use': 'Kirim Pemakaian Sendiri',
@@ -229,11 +250,11 @@ TRANSLATIONS = {
         'One row per product sold. Only completed orders are included: drafts, confirmed-but-unpaid and cancelled orders never move stock or revenue.':
             'Satu baris per produk terjual. Hanya pesanan selesai yang disertakan: pesanan draf, terkonfirmasi tapi belum dibayar, dan dibatalkan tidak pernah memengaruhi stok atau pendapatan.',
         'Restock Records': 'Catatan Restok',
-        'One row per product restocked. Unit price is what the supplier invoice listed; unit cost adds that line’s share of the invoice discount, shipping and bank fee, split in proportion to line value. Landed cost is unit cost times quantity, and the lines of a batch sum to what was paid.':
-            'Satu baris per produk direstok. Harga satuan adalah harga yang tertera di invoice pemasok; biaya satuan menambahkan bagian baris itu atas diskon, ongkos kirim, dan biaya bank invoice, dibagi sebanding dengan nilai baris. Biaya akhir adalah biaya satuan dikali kuantitas, dan baris-baris satu batch berjumlah sama dengan yang dibayarkan.',
+        'One row per product restocked. Unit price is what the supplier invoice listed; unit cost adds that line’s share of the invoice discount, shipping and bank fee, split in proportion to line value. Landed cost is unit cost times quantity, and the lines of a batch sum to what was paid. A batch numbered 45/42 is a void: it reverses batch 42, and its negative figures cancel that entry out.':
+            'Satu baris per produk direstok. Harga satuan adalah harga yang tertera di invoice pemasok; biaya satuan menambahkan bagian baris itu atas diskon, ongkos kirim, dan biaya bank invoice, dibagi sebanding dengan nilai baris. Biaya akhir adalah biaya satuan dikali kuantitas, dan baris-baris satu batch berjumlah sama dengan yang dibayarkan. Batch bernomor 45/42 adalah pembatalan: batch itu membalik batch 42, dan angka negatifnya menghapus catatan tersebut.',
         'Self Use Records': 'Catatan Pemakaian Sendiri',
-        'One row per product taken by the seller, valued at the retail price at the time of entry. No revenue, and not deducted from net profit.':
-            'Satu baris per produk yang diambil penjual, dinilai pada harga jual saat dicatat. Tidak ada pendapatan, dan tidak dikurangkan dari laba bersih.',
+        'One row per product taken by the seller, valued at the retail price at the time of entry. No revenue, and not deducted from net profit. A batch numbered 45/42 is a void: it reverses batch 42, putting that stock back.':
+            'Satu baris per produk yang diambil penjual, dinilai pada harga jual saat dicatat. Tidak ada pendapatan, dan tidak dikurangkan dari laba bersih. Batch bernomor 45/42 adalah pembatalan: batch itu membalik batch 42 dan mengembalikan stoknya.',
         'Order': 'Pesanan',
         'Unit Price': 'Harga Satuan',
         'Qty Added': 'Jml Ditambah',

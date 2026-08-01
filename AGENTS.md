@@ -58,6 +58,22 @@ bilingual (English / Bahasa Indonesia).
   `PRAGMA foreign_key_check` and refuse to continue if anything dangles.
   `tests/test_migrations.py` builds an old-shaped database and asserts the outcome;
   extend it rather than trusting a destructive migration by inspection.
+- **Corrections are reversing entries, never edits.** A mistyped restock or self-use
+  batch is voided by `services.void_restock` / `void_self_use`, which write a second
+  batch holding the negated figures and linked by `voids_batch_id`. That one column
+  carries both halves: a batch *is* a void when its own is set, and *has been* voided
+  when another points at it. Nothing is deleted or rewritten, so `sales_summary` and the
+  monthly report net the pair out on their own and a month already reported keeps the
+  totals it printed. Any new query over batches must skip rows whose batch has been
+  voided — `services._surviving_restock_lines` is the predicate.
+- **`cost_price` can only be un-blended from a snapshot.** `create_restock` records
+  `restock_items.cost_before` per line; voiding restores it, but *only* when no later
+  surviving batch has averaged onto it, since rebuilding the weighted average would need
+  stock levels that sales have since moved. When it cannot, the product gets
+  `products.cost_review_needed = 1` rather than an invented figure, and the Products page
+  *Needs cost* chip (`services.NEEDS_COST`) asks for a human. Resist any change that
+  makes the flag clear itself — only an explicit cost on the product form does, because
+  a later restock blends onto the suspect base and inherits the doubt.
 - **`ServiceError`** carries an English `template` + `params` for translation via
   `i18n.translate_error`; `str(e)` still yields English for logs.
 - **The bot poller** advances its update offset even when handling an update

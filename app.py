@@ -487,14 +487,26 @@ def api_restock():
         return _service_error(e)
     return jsonify({'success': True, 'total_cost': result['total_cost']})
 
+@app.route('/api/restock/<int:id>/void', methods=['POST'])
+@login_required
+def api_restock_void(id):
+    try:
+        result = services.void_restock(g.db, id)
+    except ServiceError as e:
+        return _service_error(e)
+    return jsonify({'success': True, **result})
+
 @app.route('/api/restock/history', methods=['GET'])
 @login_required
 def api_restock_history():
     period = request.args.get('period', 'all')
     tz = _client_tz(request.args.get('tz'))
+    # voided_by is the other half of voids_batch_id: a batch knows what it reverses, and
+    # the join says what reversed it, so one row carries both states for the table.
     query = """
         SELECT rb.id, rb.subtotal_cost, rb.discount, rb.shipping_cost, rb.admin_fee,
-               rb.total_cost, rb.created_at
+               rb.total_cost, rb.created_at, rb.voids_batch_id,
+               (SELECT v.id FROM restock_batches v WHERE v.voids_batch_id = rb.id) AS voided_by
         FROM restock_batches rb
         WHERE 1=1
     """
@@ -525,6 +537,8 @@ def api_restock_history():
             'admin_fee': b['admin_fee'],
             'total_cost': b['total_cost'],
             'created_at': b['created_at'],
+            'voids_batch_id': b['voids_batch_id'],
+            'voided_by': b['voided_by'],
             'items': [dict(i) for i in items]
         })
     return jsonify(result)
@@ -563,13 +577,23 @@ def api_self_use():
     return jsonify({'success': True, 'batch_id': result['batch_id'],
                     'total_value': result['total_value']})
 
+@app.route('/api/self-use/<int:id>/void', methods=['POST'])
+@login_required
+def api_self_use_void(id):
+    try:
+        result = services.void_self_use(g.db, id)
+    except ServiceError as e:
+        return _service_error(e)
+    return jsonify({'success': True, **result})
+
 @app.route('/api/self-use/history', methods=['GET'])
 @login_required
 def api_self_use_history():
     period = request.args.get('period', 'all')
     tz = _client_tz(request.args.get('tz'))
     query = """
-        SELECT sb.id, sb.total_value, sb.created_at
+        SELECT sb.id, sb.total_value, sb.created_at, sb.voids_batch_id,
+               (SELECT v.id FROM self_use_batches v WHERE v.voids_batch_id = sb.id) AS voided_by
         FROM self_use_batches sb
         WHERE 1=1
     """
@@ -596,6 +620,8 @@ def api_self_use_history():
             'id': b['id'],
             'total_value': b['total_value'],
             'created_at': b['created_at'],
+            'voids_batch_id': b['voids_batch_id'],
+            'voided_by': b['voided_by'],
             'items': [dict(i) for i in items]
         })
     return jsonify(result)

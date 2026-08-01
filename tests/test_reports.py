@@ -12,6 +12,7 @@ import pytest
 import database
 import i18n
 import reports
+import services
 
 JKT = ZoneInfo("Asia/Jakarta")
 # Mid-July, so offset=1 is June and offset=0 is the running month.
@@ -98,6 +99,37 @@ def test_collects_the_previous_calendar_month(db_path, shop):
     assert len(data["orders"]) == 1
     assert len(data["restocks"]) == 1
     assert len(data["self_uses"]) == 1
+
+
+def test_voiding_later_leaves_a_closed_month_with_the_figures_it_printed(db_path, shop):
+    """The whole reason a void is a new batch rather than an edit: June was reported at
+    100.000 of restock spend, and it still reads that way. The credit belongs to the
+    month the correction was actually made."""
+    shop.restock("2026-06-11 03:00:00", qty=20, cost=100000)
+    db = database.get_db()
+    services.void_restock(db, 1)   # today, months after June closed
+    db.close()
+
+    data = collect(offset=1)
+    assert len(data["restocks"]) == 1
+    assert data["restocks"][0]["voids_batch_id"] is None
+    assert data["summary"]["restock_cost"] == 100000
+
+
+def test_a_void_inside_the_month_cancels_it_out(db_path, shop, insert):
+    """Caught in the same month, the pair nets to nothing -- both rows still reported,
+    because an audit wants the mistake and the correction, not a silent gap."""
+    shop.restock("2026-06-11 03:00:00", qty=20, cost=100000)
+    void_id = insert("restock_batches", "2026-06-12 03:00:00", subtotal_cost=-100000,
+                     total_cost=-100000, voids_batch_id=1)
+
+    data = collect(offset=1)
+    assert len(data["restocks"]) == 2
+    void = next(b for b in data["restocks"] if b["voids_batch_id"])
+    assert void["voids_batch_id"] == 1
+    assert sum(b["total_cost"] for b in data["restocks"]) == 0
+    assert data["summary"]["restock_cost"] == 0
+    assert reports._batch_label(void) == f"{void_id}/1"
 
 
 def test_records_outside_the_month_are_excluded(db_path, shop):

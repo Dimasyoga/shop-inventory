@@ -128,6 +128,57 @@ def test_self_use_history_includes_nested_items(client, insert, product):
     assert rows[0]["items"][0]["quantity"] == 3
 
 
+# --- Voiding a batch ---
+
+def test_void_restock_reverses_the_batch(client, product):
+    client.post("/api/restock", json={
+        "items": [{"product_id": product, "qty": 5, "unit_price": 1000}]})
+    batch = client.get("/api/restock/history?period=all").get_json()[0]
+
+    res = client.post(f"/api/restock/{batch['id']}/void")
+    assert res.status_code == 200
+    body = res.get_json()
+    assert body["success"] is True
+    assert body["restored"] == ["Kopi"]
+
+    rows = client.get("/api/restock/history?period=all").get_json()
+    void = next(r for r in rows if r["voids_batch_id"])
+    original = next(r for r in rows if r["id"] == batch["id"])
+    assert void["voids_batch_id"] == batch["id"]
+    assert original["voided_by"] == void["id"]
+    assert void["total_cost"] == -batch["total_cost"]
+
+
+def test_void_restock_rejects_a_second_void(client, product):
+    client.post("/api/restock", json={
+        "items": [{"product_id": product, "qty": 5, "unit_price": 1000}]})
+    batch_id = client.get("/api/restock/history?period=all").get_json()[0]["id"]
+    client.post(f"/api/restock/{batch_id}/void")
+
+    res = client.post(f"/api/restock/{batch_id}/void")
+    assert res.status_code == 400
+    assert "error" in res.get_json()
+
+
+def test_void_restock_on_a_missing_batch_is_404(client):
+    assert client.post("/api/restock/999/void").status_code == 404
+
+
+def test_void_self_use_puts_the_stock_back(client, product):
+    client.post("/api/self-use", json={"items": [{"product_id": product, "qty": 3}]})
+    batch_id = client.get("/api/self-use/history?period=all").get_json()[0]["id"]
+
+    assert client.post(f"/api/self-use/{batch_id}/void").status_code == 200
+    rows = client.get("/api/self-use/history?period=all").get_json()
+    assert next(r for r in rows if r["id"] == batch_id)["voided_by"] is not None
+    products = client.get("/api/products").get_json()
+    assert next(p for p in products if p["id"] == product)["stock_qty"] == 10
+
+
+def test_void_self_use_on_a_missing_batch_is_404(client):
+    assert client.post("/api/self-use/999/void").status_code == 404
+
+
 # --- Sales ---
 
 def _completed_order(insert, when, amount, product_id):

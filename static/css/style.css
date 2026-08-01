@@ -92,6 +92,10 @@ select { padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-siz
 .cost-unknown { color: #999; }
 .cost-suspect { color: #b9770e; font-weight: 600; cursor: help; }
 
+/* A voided batch and the void reversing it both still count as history -- muted rather
+   than hidden, because the audit trail is the point of keeping them. */
+.batch-void { color: #999; font-style: italic; }
+
 /* Buttons */
 .btn {
     padding: 8px 16px; border: none; border-radius: 6px;
