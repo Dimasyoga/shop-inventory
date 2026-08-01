@@ -126,6 +126,55 @@ function saveAccount(e) {
     }).catch(err => showToast(err.message, 'error'));
 }
 
+/* Held stock versus the orders holding it. Two steps rather than a single "fix it"
+   button: the numbers say what customers were promised, so they get shown before
+   anything rewrites them. */
+function checkReservations() {
+    const box = document.getElementById('reservationResult');
+    box.innerHTML = `<p class="help-text">${t('Checking…')}</p>`;
+    api('/api/stock/reservations/check').then(d => renderReservationDrift(d.drift)).catch(err => {
+        box.innerHTML = '';
+        showToast(err.message, 'error');
+    });
+}
+
+function renderReservationDrift(drift) {
+    const box = document.getElementById('reservationResult');
+    if (!drift.length) {
+        box.innerHTML = `<p class="help-text">✅ ${t('Held stock matches the open orders. Nothing to fix.')}</p>`;
+        return;
+    }
+    const rows = drift.map(d => `<tr>
+        <td>${escapeHtml(d.name)}</td>
+        <td>${d.reserved}</td>
+        <td>${d.expected}</td>
+        <td>${d.difference > 0 ? '+' : ''}${d.difference}</td>
+    </tr>`).join('');
+    box.innerHTML = `
+        <p class="help-text">⚠️ ${escapeHtml(t('{n} product(s) hold stock that open orders do not account for.', { n: drift.length }))}</p>
+        <table>
+            <thead><tr>
+                <th>${t('Product')}</th><th>${t('Held now')}</th>
+                <th>${t('Orders justify')}</th><th>${t('Difference')}</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+        </table>
+        <div class="form-actions">
+            <button type="button" class="btn btn-primary" onclick="repairReservations()">
+                ${t('Correct held stock')}
+            </button>
+        </div>`;
+}
+
+function repairReservations() {
+    api('/api/stock/reservations/repair', 'POST').then(d => {
+        showToast(t('Corrected held stock for {n} product(s)', { n: d.repaired.length }));
+        // Re-check rather than assuming the repair emptied the list: an order written
+        // while the table was on screen is drift the repair legitimately did not cover.
+        checkReservations();
+    }).catch(err => showToast(err.message, 'error'));
+}
+
 /* ===== Products ===== */
 // The chip is a filter, not a search term, so it lives outside the search box and
 // survives typing in it. Deep-linkable as /products?needs_cost=1 so the uncosted-sales

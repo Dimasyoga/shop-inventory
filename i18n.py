@@ -329,6 +329,26 @@ TRANSLATIONS = {
         'Connected as @{name}': 'Terhubung sebagai @{name}',
         'New passwords do not match': 'Kata sandi baru tidak cocok',
         'Account updated': 'Akun diperbarui',
+        'Data integrity': 'Integritas data',
+        'Open orders hold stock until they are completed or cancelled. This checks that '
+        'what is held still matches the orders holding it — worth running if the app '
+        'refuses to sell stock you can see on the shelf.':
+            'Pesanan terbuka menahan stok sampai diselesaikan atau dibatalkan. Ini '
+            'memeriksa apakah stok yang ditahan masih cocok dengan pesanan yang '
+            'menahannya — berguna dijalankan jika aplikasi menolak menjual stok yang '
+            'terlihat ada di rak.',
+        'Check held stock': 'Periksa stok tertahan',
+        'Checking…': 'Memeriksa…',
+        'Held stock matches the open orders. Nothing to fix.':
+            'Stok tertahan sudah cocok dengan pesanan terbuka. Tidak ada yang perlu diperbaiki.',
+        '{n} product(s) hold stock that open orders do not account for.':
+            '{n} produk menahan stok yang tidak sesuai dengan pesanan terbuka.',
+        'Held now': 'Ditahan sekarang',
+        'Orders justify': 'Seharusnya',
+        'Difference': 'Selisih',
+        'Correct held stock': 'Perbaiki stok tertahan',
+        'Corrected held stock for {n} product(s)':
+            'Stok tertahan diperbaiki untuk {n} produk',
 
         # --- Telegram bot screens ---
         'What do you want to do?': 'Apa yang ingin Anda lakukan?',

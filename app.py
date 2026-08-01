@@ -923,6 +923,31 @@ def api_settings_account():
         return _err('Username already taken')
     return jsonify({'success': True})
 
+# Held stock is the one figure in the app with no visible audit trail: a sale shows up
+# in stock_logs, but a reservation only ever moves a counter. These two routes are the
+# way to see it and, separately, to put it right -- separately on purpose, so the
+# discrepancy is read before it is erased.
+def _drift_payload(rows):
+    return [{'id': r['id'], 'name': r['name'],
+             'reserved': r['reserved_qty'], 'expected': r['expected'],
+             'difference': r['reserved_qty'] - r['expected']} for r in rows]
+
+@app.route('/api/stock/reservations/check', methods=['GET'])
+@login_required
+def api_reservations_check():
+    return jsonify({'drift': _drift_payload(services.reservation_drift(g.db))})
+
+@app.route('/api/stock/reservations/repair', methods=['POST'])
+@login_required
+def api_reservations_repair():
+    repaired = services.repair_reservations(g.db)
+    if repaired:
+        # Worth a log line even though the UI reports it: this is a write to stock
+        # figures made by a button rather than by a sale, and the actor belongs on record.
+        log.warning('%s repaired held stock for %d product(s): %s', _actor(), len(repaired),
+                    ', '.join(f"{r['name']} {r['reserved_qty']}->{r['expected']}" for r in repaired))
+    return jsonify({'success': True, 'repaired': _drift_payload(repaired)})
+
 # --- Sales Dashboard ---
 @app.route('/sales')
 @login_required
@@ -1177,9 +1202,36 @@ def bootstrap(start_bot=True):
     """
     _configure_logging()
     init_db()
+    _warn_on_reservation_drift()
     if start_bot and os.environ.get('SHOP_ENABLE_BOT', '1').lower() not in ('0', 'false', 'no'):
         from telegram_bot import BotPoller
         BotPoller().start()
+
+
+def _warn_on_reservation_drift():
+    """Log held stock that no open order accounts for, once per start.
+
+    Reports but never repairs: rewriting what customers are owed is not something to
+    do to a database unattended, and Settings has the button. Startup is the moment
+    worth checking because an unclean shutdown is the likeliest way to get here.
+    Wrapped whole -- a diagnostic must not be the reason the shop cannot boot.
+    """
+    try:
+        db = get_db()
+        try:
+            drifted = services.reservation_drift(db)
+        finally:
+            db.close()
+    except Exception:
+        log.exception('could not check reserved stock against open orders')
+        return
+    if not drifted:
+        return
+    log.warning('%d product(s) hold stock that open orders do not account for; '
+                'review under Settings > Data integrity', len(drifted))
+    for row in drifted:
+        log.warning('  %s: holding %d, open orders justify %d',
+                    row['name'], row['reserved_qty'], row['expected'])
 
 if __name__ == '__main__':
     # debug exposes the Werkzeug console (remote code execution) to anyone on the

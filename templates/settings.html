@@ -95,4 +95,15 @@
         </div>
     </form>
 </div>
+
+<div class="card">
+    <h3>🧮 {{ t('Data integrity') }}</h3>
+    <p class="help-text">
+        {{ t('Open orders hold stock until they are completed or cancelled. This checks that what is held still matches the orders holding it — worth running if the app refuses to sell stock you can see on the shelf.') }}
+    </p>
+    <div class="form-actions">
+        <button type="button" class="btn" onclick="checkReservations()">{{ t('Check held stock') }}</button>
+    </div>
+    <div id="reservationResult"></div>
+</div>
 {% endblock %}

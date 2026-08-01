@@ -385,6 +385,61 @@ def cancel_order(db, order_id):
     db.commit()
 
 
+# reserved_qty is a running total maintained by _hold_stock and _release_stock, but the
+# open order lines are what actually justify it, and the two can only be checked against
+# each other by recomputing. Nothing here is expected to find anything: every path that
+# moves the column does so in one statement inside a transaction that rolls back whole.
+# It exists because the failure is silent and self-concealing when it does happen --
+# _release_stock clamps at zero, so an over-release is absorbed rather than surfaced, and
+# a lost release leaves units held by an order that no longer exists. Either way the
+# symptom is a shop owner looking at stock on the shelf that the app refuses to sell,
+# with nothing in the UI to explain it and no way back short of editing the database.
+_DRIFT_SQL = f"""
+    SELECT id, name, reserved_qty, expected FROM (
+        SELECT p.id AS id, p.name AS name, p.reserved_qty AS reserved_qty,
+               COALESCE((SELECT SUM(oi.quantity) FROM order_items oi
+                         JOIN orders o ON o.id = oi.order_id
+                         WHERE oi.product_id = p.id
+                           AND o.status IN ({','.join('?' * len(OPEN_STATUSES))})), 0) AS expected
+        FROM products p
+    ) WHERE reserved_qty != expected
+    ORDER BY name
+"""
+
+
+def reservation_drift(db):
+    """Products whose reserved_qty disagrees with the open orders holding their stock.
+
+    Read-only. Each row carries the held figure and the ``expected`` one recomputed
+    from draft and confirmed order lines; ``expected`` is the truth, since the lines
+    are what a customer was actually promised. Archived products are included --
+    stock held against one is exactly the kind of thing that goes unnoticed.
+    """
+    return db.execute(_DRIFT_SQL, OPEN_STATUSES).fetchall()
+
+
+def repair_reservations(db):
+    """Reset drifted reserved_qty figures to what the open order lines justify.
+
+    Returns the rows as they were *before* the fix, so the caller can report what it
+    changed. Safe to run with the shop live: every row is rewritten to a figure derived
+    from the same transaction that reads it, and a concurrent order that holds stock in
+    between simply shows up as drift on the next run rather than being clobbered here.
+
+    Deliberately not automatic. Repair is the right call almost every time, but it
+    rewrites a number that says what customers are owed, and a shop owner is entitled
+    to see the discrepancy before it disappears.
+    """
+    drifted = reservation_drift(db)
+    if not drifted:
+        return []
+    db.executemany("UPDATE products SET reserved_qty = ?, updated_at = CURRENT_TIMESTAMP"
+                   " WHERE id = ?",
+                   [(row['expected'], row['id']) for row in drifted])
+    db.commit()
+    return drifted
+
+
 # --- Restock ---
 
 def allocate_restock_costs(items, discount=0, shipping_cost=0, admin_fee=0):
