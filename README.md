@@ -172,7 +172,7 @@ The database is created automatically on first run. `database.py` handles:
 | Table | Purpose |
 |---|---|
 | `users` | Authentication (username, password) |
-| `products` | Product catalog (SKU, sale price, cost price, stock, threshold, cost-review flag) |
+| `products` | Product catalog (SKU, sale price, cost price, stock, stock held by open orders, threshold, cost-review flag) |
 | `stock_logs` | Stock adjustment audit trail |
 | `orders` | Order header (status, total) |
 | `order_items` | Order line items (price and cost snapshot per line) |
@@ -462,13 +462,40 @@ docker compose logs -f app
 ### Creating an Order
 
 1. Navigate to **Orders** page, click **+ New Order**
-2. Click **+ Add Item** for each product
-3. Select product from dropdown (shows current stock), enter quantity
+2. Click **+ Add Item** for each product (✕ removes a line again)
+3. Select product from dropdown (shows how many are **available**), enter quantity
 4. Subtotal and grand total update automatically
-5. Click **Create Order** → order saved as **draft**
+5. Click **Create Order** → order saved as **draft**, and the stock is now **held** for it
 6. When payment is received, click ✅ → order becomes **confirmed** (payment confirmed, no stock deducted)
 7. When items are delivered, click 💰 → order becomes **completed** (stock deducted from inventory)
 8. Only **completed** orders count toward sales revenue and dashboard stats
+
+A draft can be corrected with ✏️ instead of being cancelled and retyped. Editing
+re-prices the order at today's prices, and adjusts what it holds — so lowering a
+quantity or dropping a line puts those units straight back on sale. Once an order is
+confirmed the money has been taken and the lines are fixed; cancel and re-enter it if
+it is wrong.
+
+### Held Stock
+
+An order holds its stock from the moment it is created until it is completed or
+cancelled. This is what stops the last unit being promised to two customers: before,
+both orders were accepted and the second one failed at delivery.
+
+- **Stock** is what is physically on the shelf. It only changes when an order is
+  completed, when you restock, or when you record self use — never because an order
+  was typed. The dashboard, low-stock alerts and the monthly report all read this.
+- **Available** is what a new order can still take: stock minus everything open orders
+  have claimed. The order form and the bot's order flow offer this number.
+
+The Products page shows both when they differ, and the order form refuses what isn't
+available with a message naming how many units other orders are holding — chase or
+cancel those orders to free them.
+
+Self use and stock adjustments are deliberately *not* blocked by a hold: they record
+something that already happened physically, and refusing them would only make the
+records wrong. Taking the last unit for yourself when an order is waiting on it leaves
+that order to fail at completion, exactly as before.
 
 ### Adding Products
 
@@ -549,14 +576,19 @@ who asked for it or how.
 ### Order Lifecycle Diagram
 
 ```
+            stock held ────────────────────────┐   stock deducted
+                 │                             │          │
 Draft ──[Confirm Payment]──> Confirmed ──[Complete/Deliver]──> Completed
-  │                              │
-  │                              └──[Cancel]──> Cancelled  (no stock impact)
+  │  ▲                           │
+  │  └──[Edit]                   └──[Cancel]──> Cancelled  (hold released)
   │                                                 ▲
   └────[Cancel]─────────────────────────────────────┘
 
 Completed ──[Cannot Cancel]──> (Final state)
 ```
+
+Draft and Confirmed both hold their stock; only Completed moves it. Cancelling from
+either gives the units back, and editing a draft adjusts what it holds.
 
 ### Restock Cost Flow
 

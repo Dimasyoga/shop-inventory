@@ -74,6 +74,26 @@ bilingual (English / Bahasa Indonesia).
   *Needs cost* chip (`services.NEEDS_COST`) asks for a human. Resist any change that
   makes the flag clear itself — only an explicit cost on the product form does, because
   a later restock blends onto the suspect base and inherits the doubt.
+- **An open order holds its stock; `stock_qty` never moves until it is completed.**
+  `products.reserved_qty` counts units promised to draft and confirmed orders, and what
+  a new order may draw on is `services.AVAILABLE` (`stock_qty - reserved_qty`), never
+  `stock_qty`. Keep the two apart: `stock_qty` is physical stock, which is what the
+  dashboard, low-stock alerts, the restock weighted average and the monthly report all
+  read, and none of them should shift because an order was typed. Hold with
+  `_hold_stock` — the condition and the increment are one statement, because checking
+  first and claiming after is the exact race this replaced. Completion decrements both
+  columns together; cancelling releases. Releases clamp at zero, since a negative
+  reservation would read as extra availability and hand out stock that isn't there.
+- **Editing a draft releases every old line before taking the new ones**
+  (`services.update_order`), rather than computing per-product deltas. That ordering is
+  what lets an edit spend units it is itself giving up — dropping one line to add
+  another of the last item, or just correcting 3 to 2 — and `db.rollback()` restores the
+  old holds exactly when a new line cannot be met. Drafts only: a confirmed order has
+  been paid for. Self use and stock adjustment still work on `stock_qty` directly and
+  are *not* checked against reservations — they record something that already physically
+  happened, so refusing them would only make the database wrong. A hold is a claim on
+  stock, not a lock on the shelf, and `complete_order` keeps its `stock_qty` guard for
+  exactly that case.
 - **The login throttle buckets by client address, not username.** Five failures in
   15 minutes lock the bucket (`app._login_failures`), and a lockout refuses the
   *correct* password too — checking credentials first would make the throttle an

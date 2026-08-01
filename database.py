@@ -135,6 +135,7 @@ def init_db():
             price REAL NOT NULL DEFAULT 0,
             cost_price REAL NOT NULL DEFAULT 0,
             stock_qty INTEGER NOT NULL DEFAULT 0,
+            reserved_qty INTEGER NOT NULL DEFAULT 0,
             reorder_threshold INTEGER NOT NULL DEFAULT 0,
             is_archived INTEGER NOT NULL DEFAULT 0,
             cost_review_needed INTEGER NOT NULL DEFAULT 0,
@@ -399,6 +400,39 @@ def init_db():
     restock_item_cols = [r[1] for r in c.execute("PRAGMA table_info(restock_items)").fetchall()]
     if 'cost_before' not in restock_item_cols:
         c.execute("ALTER TABLE restock_items ADD COLUMN cost_before REAL NOT NULL DEFAULT 0")
+
+    # Migrate: stock held by orders that have not been fulfilled yet. Stock used to
+    # move only on completion, so two drafts for the last unit both passed their check
+    # and the second failed at completion -- after the customer had been told yes.
+    # An open order now holds its units the moment it is written.
+    #
+    # This deliberately does NOT touch stock_qty, which keeps meaning physical stock on
+    # the shelf: the dashboard, the low-stock alerts, the restock weighted average and
+    # the monthly report all read it and none of them should shift because an order was
+    # typed. What orders can be filled from is stock_qty - reserved_qty.
+    product_cols = [r[1] for r in c.execute("PRAGMA table_info(products)").fetchall()]
+    if 'reserved_qty' not in product_cols:
+        c.execute("ALTER TABLE products ADD COLUMN reserved_qty INTEGER NOT NULL DEFAULT 0")
+        # Orders already open when this ships have to start holding their stock too,
+        # or the column reads as "nothing reserved" while real orders are waiting on
+        # those units. Runs only in the pass that adds the column, so a re-run cannot
+        # double-count.
+        c.execute("""UPDATE products SET reserved_qty = COALESCE((
+                         SELECT SUM(oi.quantity) FROM order_items oi
+                         JOIN orders o ON o.id = oi.order_id
+                         WHERE oi.product_id = products.id
+                           AND o.status IN ('draft', 'confirmed')), 0)""")
+        held = c.execute("SELECT COUNT(*) FROM products WHERE reserved_qty > 0").fetchone()[0]
+        # Backfilling can leave a product oversold already -- open orders written under
+        # the old rules were never checked against each other. Nothing is rewritten to
+        # hide it: the figure is what those orders actually promised, and the products
+        # page shows the negative availability until a restock or a cancellation clears it.
+        oversold = c.execute(
+            "SELECT COUNT(*) FROM products WHERE reserved_qty > stock_qty").fetchone()[0]
+        log.warning('reserved stock for %d product(s) held by open orders', held)
+        if oversold:
+            log.warning('%d product(s) have open orders promising more than is in stock; '
+                        'they show negative availability until restocked or cancelled', oversold)
 
     # Seed the first user. Credentials come from the environment so a deployment
     # never has to ship with the documented default; changing them later has no

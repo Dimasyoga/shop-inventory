@@ -139,8 +139,13 @@ def _json_body():
 
 def _products_json(rows):
     """Plain dicts for embedding in templates via |tojson (sqlite3.Row isn't serializable)."""
+    # 'stock' is physical stock; 'available' is what an order can still draw on once
+    # open orders have taken their hold. Restock and self use work on the first, the
+    # order form on the second.
     return [{'id': p['id'], 'name': p['name'], 'sku': p['sku'],
-             'price': p['price'], 'cost': p['cost_price'], 'stock': p['stock_qty']}
+             'price': p['price'], 'cost': p['cost_price'], 'stock': p['stock_qty'],
+             'reserved': p['reserved_qty'],
+             'available': p['stock_qty'] - p['reserved_qty']}
             for p in rows]
 
 def _validate_product(data):
@@ -349,7 +354,10 @@ def api_products():
         query += f" AND ({services.NEEDS_COST})"
     query += " ORDER BY name"
     products = g.db.execute(query, params).fetchall()
-    return jsonify([dict(r) for r in products])
+    # 'available' is derived rather than stored, and shipped here so the order form can
+    # refresh what it may still sell without re-deriving the subtraction client-side.
+    return jsonify([{**dict(r), 'available': r['stock_qty'] - r['reserved_qty']}
+                    for r in products])
 
 @app.route('/api/products', methods=['POST'])
 @login_required
@@ -476,7 +484,12 @@ def orders_page():
         params.append(f'%{search}%')
     query += " ORDER BY created_at DESC"
     orders = g.db.execute(query, params).fetchall()
-    products = g.db.execute("SELECT * FROM products WHERE is_archived = 0 AND stock_qty > 0 ORDER BY name").fetchall()
+    # The whole active catalogue, not just what is sellable today: the form hides rows
+    # with nothing available, but a draft being edited must still be able to show the
+    # product it is already holding. Same list shape the form refetches on open, so
+    # what it filters does not depend on which of the two it got.
+    products = g.db.execute(
+        "SELECT * FROM products WHERE is_archived = 0 ORDER BY name").fetchall()
     return render_template('orders.html', orders=orders, products_json=_products_json(products), format_rupiah=format_rupiah)
 
 @app.route('/api/orders', methods=['GET'])
@@ -505,25 +518,43 @@ def api_orders():
         result.append({**dict(o), 'items': [dict(i) for i in items]})
     return jsonify(result)
 
-@app.route('/api/orders', methods=['POST'])
-@login_required
-def api_create_order():
+def _order_items_body():
+    """Validated order lines from the request. Returns (items, error_response)."""
     data = _json_body()
     if data is None:
-        return _err('Invalid JSON body')
+        return None, _err('Invalid JSON body')
     items = data.get('items')
     if not isinstance(items, list) or not items:
-        return _err('At least one item required')
+        return None, _err('At least one item required')
     for item in items:
         pid = item.get('product_id') if isinstance(item, dict) else None
         qty = item.get('quantity') if isinstance(item, dict) else None
         # bool is an int subclass: True would slip through as quantity 1
         if not isinstance(pid, int) or isinstance(pid, bool) \
                 or not isinstance(qty, int) or isinstance(qty, bool) or qty <= 0:
-            return _err('Each item needs a product_id and a positive whole-number quantity')
+            return None, _err('Each item needs a product_id and a positive whole-number quantity')
+    return items, None
 
+@app.route('/api/orders', methods=['POST'])
+@login_required
+def api_create_order():
+    items, error = _order_items_body()
+    if error:
+        return error
     try:
         result = services.create_order(g.db, items)
+    except ServiceError as e:
+        return _service_error(e)
+    return jsonify({'success': True, 'order_id': result['order_id'], 'total': result['total']})
+
+@app.route('/api/orders/<int:id>', methods=['PUT'])
+@login_required
+def api_update_order(id):
+    items, error = _order_items_body()
+    if error:
+        return error
+    try:
+        result = services.update_order(g.db, id, items)
     except ServiceError as e:
         return _service_error(e)
     return jsonify({'success': True, 'order_id': result['order_id'], 'total': result['total']})

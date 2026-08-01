@@ -96,6 +96,7 @@ select { padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-siz
    different problems for the shop owner. */
 .cost-unknown { color: #999; }
 .cost-suspect { color: #b9770e; font-weight: 600; cursor: help; }
+.stock-held { color: #999; font-size: 12px; white-space: nowrap; }
 
 /* A voided batch and the void reversing it both still count as history -- muted rather
    than hidden, because the audit trail is the point of keeping them. */

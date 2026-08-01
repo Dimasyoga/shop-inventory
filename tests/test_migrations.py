@@ -99,8 +99,8 @@ def test_category_id_column_is_gone(legacy_db):
     cols = {r["name"] for r in query(legacy_db, "PRAGMA table_info(products)")}
     assert "category_id" not in cols
     assert cols == {"id", "name", "sku", "price", "cost_price", "stock_qty",
-                    "reorder_threshold", "is_archived", "cost_review_needed",
-                    "created_at", "updated_at"}
+                    "reserved_qty", "reorder_threshold", "is_archived",
+                    "cost_review_needed", "created_at", "updated_at"}
 
 
 def test_the_rebuild_leaves_no_scratch_table_behind(legacy_db):
@@ -267,3 +267,102 @@ def test_an_old_batch_is_still_voidable_and_takes_the_flag_path(legacy_db, monke
     assert query(legacy_db, "SELECT stock_qty, cost_review_needed FROM products WHERE id = 7") == [
         {"stock_qty": 98, "cost_review_needed": 1}]
     assert query(legacy_db, "SELECT SUM(total_cost) AS t FROM restock_batches") == [{"t": 60000.0}]
+
+
+# --- Reserved stock, on a database whose orders never held any ---
+
+# products as it stood before open orders held stock, plus the order tables the
+# backfill reads. init_db() creates everything else from scratch.
+PRE_RESERVATION_SCHEMA = '''
+CREATE TABLE products (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, sku TEXT UNIQUE,
+    price REAL NOT NULL DEFAULT 0, cost_price REAL NOT NULL DEFAULT 0,
+    stock_qty INTEGER NOT NULL DEFAULT 0, reorder_threshold INTEGER NOT NULL DEFAULT 0,
+    is_archived INTEGER NOT NULL DEFAULT 0, cost_review_needed INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE orders (id INTEGER PRIMARY KEY AUTOINCREMENT, status TEXT NOT NULL DEFAULT 'draft',
+    total_amount REAL NOT NULL DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE order_items (id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER NOT NULL,
+    product_id INTEGER NOT NULL, quantity INTEGER NOT NULL, unit_price REAL NOT NULL,
+    subtotal REAL NOT NULL, FOREIGN KEY (order_id) REFERENCES orders(id),
+    FOREIGN KEY (product_id) REFERENCES products(id));
+
+INSERT INTO products (id, name, price, stock_qty) VALUES
+    (1, 'Kopi', 25000, 10), (2, 'Teh', 2000, 4), (3, 'Gula', 5000, 7);
+-- One order per status. Only draft and confirmed are still waiting on their units:
+-- completed already took them out of stock_qty, cancelled gave them up.
+INSERT INTO orders (id, status) VALUES (1, 'draft'), (2, 'confirmed'),
+    (3, 'completed'), (4, 'cancelled');
+INSERT INTO order_items (order_id, product_id, quantity, unit_price, subtotal) VALUES
+    (1, 1, 2, 25000, 50000),
+    (2, 1, 3, 25000, 75000),
+    (3, 1, 4, 25000, 100000),
+    (4, 1, 5, 25000, 125000),
+    -- Teh is already oversold: an open order promises 6 of the 4 in stock. Nothing
+    -- checked that under the old rules, and the upgrade inherits the situation.
+    (2, 2, 6, 2000, 12000);
+'''
+
+
+@pytest.fixture
+def pre_reservation_db(tmp_path, monkeypatch):
+    """A database from before orders reserved stock, migrated by init_db()."""
+    path = tmp_path / "pre-reservation.db"
+    conn = sqlite3.connect(str(path))
+    conn.executescript(PRE_RESERVATION_SCHEMA)
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(database, "DB_PATH", str(path))
+    monkeypatch.delenv("SHOP_ENCRYPTION_KEY", raising=False)
+    monkeypatch.setattr(database, "ENCRYPTION_KEY_PATH", str(tmp_path / "pre-reservation.key"))
+    database.init_db()
+    return str(path)
+
+
+def test_open_orders_start_holding_their_stock(pre_reservation_db):
+    # Kopi: 2 from the draft and 3 from the confirmed order. The completed order's 4
+    # already left stock_qty and the cancelled order's 5 were given up, so counting
+    # either would hold units nothing is waiting on.
+    assert query(pre_reservation_db,
+                 "SELECT id, stock_qty, reserved_qty FROM products ORDER BY id") == [
+        {"id": 1, "stock_qty": 10, "reserved_qty": 5},
+        {"id": 2, "stock_qty": 4, "reserved_qty": 6},
+        {"id": 3, "stock_qty": 7, "reserved_qty": 0},
+    ]
+
+
+def test_an_already_oversold_product_keeps_its_honest_figure(pre_reservation_db):
+    # Teh's open order promises 6 of 4. Clamping the reservation to stock would make
+    # the shortfall vanish from the page that has to surface it, and would quietly
+    # free units the order is still counting on.
+    rows = query(pre_reservation_db,
+                 "SELECT stock_qty - reserved_qty AS available FROM products WHERE id = 2")
+    assert rows == [{"available": -2}]
+
+
+def test_stock_itself_is_untouched_by_the_upgrade(pre_reservation_db):
+    # Reserving is bookkeeping about orders, not a stock movement: nothing physically
+    # left the shelf, so the dashboard, the low-stock alerts and the monthly report
+    # must all read exactly what they read before.
+    assert query(pre_reservation_db, "SELECT SUM(stock_qty) AS total FROM products") == [
+        {"total": 21}]
+    assert query(pre_reservation_db, "SELECT COUNT(*) AS n FROM stock_logs") == [{"n": 0}]
+
+
+def test_migrating_twice_does_not_double_count_the_holds(pre_reservation_db):
+    # The backfill runs in the pass that adds the column. A re-run that recomputed it
+    # would be harmless here but would wipe every hold taken since the upgrade.
+    database.init_db()
+    assert query(pre_reservation_db, "SELECT reserved_qty FROM products WHERE id = 1") == [
+        {"reserved_qty": 5}]
+
+
+def test_a_later_run_leaves_live_reservations_alone(pre_reservation_db):
+    conn = sqlite3.connect(pre_reservation_db)
+    conn.execute("UPDATE products SET reserved_qty = 9 WHERE id = 3")
+    conn.commit()
+    conn.close()
+    database.init_db()
+    assert query(pre_reservation_db, "SELECT reserved_qty FROM products WHERE id = 3") == [
+        {"reserved_qty": 9}]

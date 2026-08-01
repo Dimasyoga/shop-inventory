@@ -143,6 +143,10 @@ TRANSLATIONS = {
         '{n} items': '{n} item',
         'Add at least one item': 'Tambahkan minimal satu item',
         'Order ID {id} created': 'Pesanan ID {id} dibuat',
+        'Edit Order': 'Edit Pesanan',
+        'Save Changes': 'Simpan Perubahan',
+        'Order ID {id} updated': 'Pesanan ID {id} diperbarui',
+        'Remove': 'Hapus',
         'Confirm payment for this order?': 'Konfirmasi pembayaran untuk pesanan ini?',
         'Payment confirmed': 'Pembayaran dikonfirmasi',
         'Complete this order? Stock will be deducted.':
@@ -153,6 +157,8 @@ TRANSLATIONS = {
         'Order ID {id}': 'Pesanan ID {id}',
         'No orders found': 'Tidak ada pesanan ditemukan',
         'Stock: {n}': 'Stok: {n}',
+        'Available: {n}': 'Tersedia: {n}',
+        'Held: {n}': 'Ditahan: {n}',
 
         # --- Restock ---
         'New Restock': 'Restok Baru',
@@ -345,6 +351,7 @@ TRANSLATIONS = {
         'Next ▶': 'Berikutnya ▶',
         'No products yet.': 'Belum ada produk.',
         'stock {n}': 'stok {n}',
+        ', {n} held': ', {n} ditahan',
         'Pick a status:': 'Pilih status:',
         '📝 Draft': '📝 Draf',
         '💳 Confirmed': '💳 Dikonfirmasi',
@@ -382,6 +389,7 @@ TRANSLATIONS = {
         '+ Add more': '+ Tambah lagi',
         'How many <b>{name}</b>?': 'Berapa banyak <b>{name}</b>?',
         ' (stock: {n})': ' (stok: {n})',
+        ' (available: {n})': ' (tersedia: {n})',
         'Tap a number, or ✏️ Custom to type any amount.':
             'Ketuk angka, atau ✏️ Kustom untuk mengetik jumlah apa pun.',
         '• {name} ×{qty} — <i>price missing</i>': '• {name} ×{qty} — <i>harga belum diisi</i>',
@@ -444,8 +452,11 @@ TRANSLATIONS = {
         'Order not found': 'Pesanan tidak ditemukan',
         'Product {id} not found': 'Produk {id} tidak ditemukan',
         'Insufficient stock for {name}': 'Stok tidak cukup untuk {name}',
+        'Only {n} of {name} available, {held} held by other orders':
+            'Hanya {n} {name} yang tersedia, {held} ditahan oleh pesanan lain',
         'Insufficient stock for product #{id}': 'Stok tidak cukup untuk produk #{id}',
         'Only draft orders can be confirmed': 'Hanya pesanan draf yang dapat dikonfirmasi',
+        'Only draft orders can be edited': 'Hanya pesanan draf yang dapat diedit',
         'Only confirmed orders can be completed':
             'Hanya pesanan yang dikonfirmasi yang dapat diselesaikan',
         'Cannot cancel completed orders': 'Tidak dapat membatalkan pesanan yang sudah selesai',

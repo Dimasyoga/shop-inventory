@@ -238,7 +238,12 @@ def screen_products(db, page, t):
     lines = [f'<b>📦 {t("Products")}</b>']
     for p in rows:
         sku = f" [{esc(p['sku'])}]" if p['sku'] else ''
-        lines.append(f"• {esc(p['name'])}{sku} — {format_rupiah(p['price'])} ({t('stock {n}', n=p['stock_qty'])})")
+        stock = t('stock {n}', n=p['stock_qty'])
+        # Only worth saying when some of that stock is spoken for; otherwise the two
+        # numbers are the same and the second is noise.
+        if p['reserved_qty']:
+            stock += t(', {n} held', n=p['reserved_qty'])
+        lines.append(f"• {esc(p['name'])}{sku} — {format_rupiah(p['price'])} ({stock})")
     nav = []
     if page > 0:
         nav.append(btn(t('◀ Prev'), f'p:{page - 1}'))
@@ -400,8 +405,14 @@ def screen_flow_picker(db, flow, items, page, t):
     buttons = []
     for p in rows:
         # Restock adds stock, so the current level is noise there; the flows that
-        # take stock out need it visible.
-        stock = f" ({p['stock_qty']})" if flow != 'restock' else ''
+        # take stock out need it visible. An order can only draw on what other open
+        # orders have not already claimed, while self use takes off the shelf directly.
+        if flow == 'restock':
+            stock = ''
+        elif flow == 'order':
+            stock = f" ({p['stock_qty'] - p['reserved_qty']})"
+        else:
+            stock = f" ({p['stock_qty']})"
         buttons.append([btn(f"{p['name'][:28]}{stock}", f'{prefix}:i:{p["id"]}')])
     nav = []
     if page > 0:
@@ -421,7 +432,9 @@ def screen_flow_qty(db, flow, pid, t):
     p = db.execute("SELECT * FROM products WHERE id = ?", (pid,)).fetchone()
     name = esc(p['name']) if p else f'#{pid}'
     text = t('How many <b>{name}</b>?', name=name)
-    if flow != 'restock' and p:
+    if p and flow == 'order':
+        text += t(' (available: {n})', n=p['stock_qty'] - p['reserved_qty'])
+    elif p and flow != 'restock':
         text += t(' (stock: {n})', n=p['stock_qty'])
     text += '\n' + t('Tap a number, or ✏️ Custom to type any amount.')
     qty_row = [btn(str(n), f'{prefix}:q:{n}') for n in QTY_CHOICES]

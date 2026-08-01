@@ -3,7 +3,7 @@
 {% block content %}
 <div class="page-header">
     <h2>{{ t('Orders') }}</h2>
-    <button class="btn btn-primary" onclick="openOrderModal()">{{ t('+ New Order') }}</button>
+    <button class="btn btn-primary" onclick="newOrder()">{{ t('+ New Order') }}</button>
 </div>
 
 <div class="card">
@@ -30,7 +30,7 @@
 <div class="modal" id="orderModal">
     <div class="modal-content" style="max-width: 600px">
         <div class="modal-header">
-            <h3>{{ t('New Order') }}</h3>
+            <h3 id="orderModalTitle">{{ t('New Order') }}</h3>
             <span class="modal-close" onclick="closeOrderModal()">&times;</span>
         </div>
         <div id="orderItems" style="margin-bottom:16px"></div>
@@ -40,7 +40,7 @@
         </div>
         <div class="modal-actions">
             <button type="button" class="btn btn-secondary" onclick="closeOrderModal()">{{ t('Cancel') }}</button>
-            <button type="button" class="btn btn-primary" onclick="createOrder()">{{ t('Create Order') }}</button>
+            <button type="button" class="btn btn-primary" id="orderSubmitBtn" onclick="saveOrder()">{{ t('Create Order') }}</button>
         </div>
     </div>
 </div>
@@ -57,6 +57,7 @@
 </div>
 
 <script>
-const PRODUCTS = {{ products_json | tojson }};
+// let, not const: the order form refetches availability every time it opens.
+let PRODUCTS = {{ products_json | tojson }};
 </script>
 {% endblock %}

@@ -179,6 +179,15 @@ function costCell(p) {
     return `<td class="cost-unknown" title="${t('No cost recorded — sales of this product are left out of profit')}">—</td>`;
 }
 
+// Physical stock and what is sellable are different numbers once open orders hold
+// units, and both matter: a stock count reconciles against the first, a new order
+// against the second. Shown together rather than netted, and only when they differ.
+function stockCell(p) {
+    if (!p.reserved_qty) return `<td>${p.stock_qty}</td>`;
+    return `<td title="${t('Held: {n}', { n: p.reserved_qty })}">${p.stock_qty}`
+        + ` <span class="stock-held">${t('Available: {n}', { n: p.available })}</span></td>`;
+}
+
 function loadProducts() {
     const search = document.getElementById('searchProduct').value;
     let url = '/api/products?';
@@ -206,7 +215,7 @@ function loadProducts() {
                 <td>${escapeHtml(p.name)}</td>
                 <td>${formatRupiah(p.price)}</td>
                 ${costCell(p)}
-                <td>${p.stock_qty}</td>
+                ${stockCell(p)}
                 <td class="action-cell">${actions(p)}</td>
             </tr>
         `).join('');
@@ -323,6 +332,7 @@ function loadOrders() {
                 <td><span class="badge badge-${o.status}">${o.status === 'confirmed' ? t('Payment Confirmed') : t(o.status)}</span></td>
                 <td class="action-cell">
                     <button class="btn-icon" onclick="viewOrder(${o.id})" title="${t('View')}">👁️</button>
+                    ${o.status === 'draft' ? `<button class="btn-icon" onclick="editOrder(${o.id})" title="${t('Edit')}">✏️</button>` : ''}
                     ${o.status === 'draft' ? `<button class="btn-icon" onclick="confirmOrder(${o.id})" title="${t('Confirm')}">✅</button>` : ''}
                     ${o.status === 'confirmed' ? `<button class="btn-icon" onclick="completeOrder(${o.id})" title="${t('Complete')}">💰</button>` : ''}
                     ${o.status === 'draft' || o.status === 'confirmed' ? `<button class="btn-icon" onclick="cancelOrder(${o.id})" title="${t('Cancel')}">❌</button>` : ''}
@@ -332,72 +342,137 @@ function loadOrders() {
     });
 }
 
-function openOrderModal() {
-    orderItems = [];
+// Set while the modal is editing an existing draft; null while creating one.
+let editingOrderId = null;
+// product_id -> units the draft being edited already holds. Those units are
+// reserved against this very order, so they are still spendable here even though
+// the products page counts them as unavailable.
+let editingHolds = {};
+
+function availableFor(p) {
+    return p.available + (editingHolds[p.id] || 0);
+}
+
+// Availability baked into the page at render time is stale as soon as anyone else
+// writes an order -- a second device, or the Telegram bot. The form refetches it on
+// every open so the seller is never choosing from numbers that have moved on.
+function refreshProducts() {
+    return fetch('/api/products').then(r => r.json())
+        .then(rows => { PRODUCTS = rows; })
+        .catch(() => { /* keep the page's copy; the server still enforces the hold */ });
+}
+
+function newOrder() {
+    refreshProducts().then(() => openOrderModal(null));
+}
+
+function editOrder(id) {
+    fetch('/api/orders?').then(r => r.json()).then(orders => {
+        const o = orders.find(x => x.id === id);
+        if (!o) return;
+        refreshProducts().then(() => openOrderModal(o));
+    });
+}
+
+function openOrderModal(order) {
+    editingOrderId = order ? order.id : null;
+    editingHolds = {};
+    if (order) {
+        (order.items || []).forEach(i => {
+            editingHolds[i.product_id] = (editingHolds[i.product_id] || 0) + i.quantity;
+            // A product archived while this draft sat open is out of the catalogue and
+            // so absent from PRODUCTS, but it is still on the order. Without this the
+            // line has no option to select and saving would drop it unannounced.
+            if (!PRODUCTS.some(p => p.id === i.product_id)) {
+                PRODUCTS.push({ id: i.product_id, name: i.product_name, price: i.unit_price,
+                                stock_qty: 0, reserved_qty: i.quantity, available: 0 });
+            }
+        });
+    }
+    document.getElementById('orderModalTitle').textContent = order ? t('Edit Order') : t('New Order');
+    document.getElementById('orderSubmitBtn').textContent = order ? t('Save Changes') : t('Create Order');
     document.getElementById('orderItems').innerHTML = '';
     document.getElementById('orderTotal').textContent = 'Rp 0';
+    if (order) {
+        (order.items || []).forEach(i => addOrderItem(i.product_id, i.quantity));
+        calcOrderTotal();
+    }
     document.getElementById('orderModal').classList.add('active');
 }
 function closeOrderModal() { document.getElementById('orderModal').classList.remove('active'); }
 
-function addOrderItem() {
-    const idx = document.getElementById('orderItems').children.length;
+function addOrderItem(productId, qty) {
     const div = document.createElement('div');
     div.className = 'form-row';
     div.style.marginBottom = '8px';
+    // A product with nothing available is not offered -- except the one this row is
+    // already on, which would otherwise vanish from its own order on opening the editor.
+    const options = PRODUCTS.filter(p => availableFor(p) > 0 || p.id === productId)
+        .map(p => `<option value="${p.id}" data-price="${p.price}"${p.id === productId ? ' selected' : ''}>`
+            + `${escapeHtml(p.name)} (${t('Available: {n}', { n: availableFor(p) })})</option>`).join('');
     div.innerHTML = `
         <div class="form-group">
-            <select onchange="onProductSelect(this, ${idx})">
+            <select onchange="calcOrderTotal()">
                 <option value="">${t('Select product')}</option>
-                ${PRODUCTS.map(p => `<option value="${p.id}" data-price="${p.price}" data-stock="${p.stock}">${escapeHtml(p.name)} (${t('Stock: {n}', { n: p.stock })})</option>`).join('')}
+                ${options}
             </select>
         </div>
         <div class="form-group">
-            <input type="number" min="1" value="1" class="qty-input" data-idx="${idx}" oninput="calcOrderTotal()">
+            <input type="number" min="1" value="${qty > 0 ? qty : 1}" class="qty-input" oninput="calcOrderTotal()">
         </div>
         <div class="form-group">
-            <span class="item-subtotal" data-idx="${idx}" style="font-weight:600">Rp 0</span>
+            <span class="item-subtotal" style="font-weight:600">Rp 0</span>
         </div>
+        <button type="button" class="btn-icon" title="${t('Remove')}" onclick="removeOrderItem(this)">✕</button>
     `;
     document.getElementById('orderItems').appendChild(div);
 }
 
-function onProductSelect(sel, idx) {
-    const opt = sel.options[sel.selectedIndex];
-    const price = parseFloat(opt.dataset.price) || 0;
-    const qtyInput = document.querySelector(`.qty-input[data-idx="${idx}"]`);
+function removeOrderItem(btn) {
+    btn.closest('.form-row').remove();
     calcOrderTotal();
+}
+
+// Read per row rather than by walking three parallel NodeLists: rows can be removed
+// now, and positional matching across separate queries is a trap waiting for the day
+// a row holds one input but not the other.
+function orderRows() {
+    return [...document.querySelectorAll('#orderItems .form-row')].map(row => ({
+        row,
+        select: row.querySelector('select'),
+        qtyInput: row.querySelector('.qty-input'),
+        subtotal: row.querySelector('.item-subtotal'),
+    }));
 }
 
 function calcOrderTotal() {
     let total = 0;
-    const selects = document.querySelectorAll('#orderItems select');
-    const qtyInputs = document.querySelectorAll('.qty-input');
-    const subtotals = document.querySelectorAll('.item-subtotal');
-    selects.forEach((sel, i) => {
-        const opt = sel.options[sel.selectedIndex];
+    orderRows().forEach(({ select, qtyInput, subtotal }) => {
+        const opt = select.options[select.selectedIndex];
         const price = parseFloat(opt.dataset.price) || 0;
-        const qty = parseInt(qtyInputs[i].value) || 0;
-        const sub = price * qty;
+        const sub = price * (parseInt(qtyInput.value) || 0);
         total += sub;
-        subtotals[i].textContent = formatRupiah(sub);
+        subtotal.textContent = formatRupiah(sub);
     });
     document.getElementById('orderTotal').textContent = formatRupiah(total);
 }
 
-function createOrder() {
-    const selects = document.querySelectorAll('#orderItems select');
-    const qtyInputs = document.querySelectorAll('.qty-input');
+function saveOrder() {
     const items = [];
-    for (let i = 0; i < selects.length; i++) {
-        const pid = parseInt(selects[i].value);
-        const qty = parseInt(qtyInputs[i].value) || 0;
+    orderRows().forEach(({ select, qtyInput }) => {
+        const pid = parseInt(select.value);
+        const qty = parseInt(qtyInput.value) || 0;
         if (pid && qty > 0) items.push({ product_id: pid, quantity: qty });
-    }
+    });
     if (!items.length) return showToast(t('Add at least one item'), 'error');
-    api('/api/orders', 'POST', { items }).then(d => {
+    const editing = editingOrderId !== null;
+    const request = editing
+        ? api('/api/orders/' + editingOrderId, 'PUT', { items })
+        : api('/api/orders', 'POST', { items });
+    request.then(d => {
         if (d.success) {
-            showToast(t('Order ID {id} created', { id: d.order_id }));
+            showToast(editing ? t('Order ID {id} updated', { id: d.order_id })
+                              : t('Order ID {id} created', { id: d.order_id }));
             closeOrderModal();
             loadOrders();
         } else showToast(d.error, 'error');

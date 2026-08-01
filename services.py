@@ -125,6 +125,87 @@ def list_products(db, page=0, page_size=8, search=None):
 
 # --- Orders ---
 
+# An order holds its stock from the moment it is written until it is completed or
+# cancelled, so what a new order can draw on is stock minus what is already spoken
+# for. stock_qty stays physical stock throughout -- see the reserved_qty migration.
+AVAILABLE = "(stock_qty - reserved_qty)"
+
+# The statuses that hold stock. Anything else has either taken its units out of
+# stock_qty (completed) or given them back (cancelled).
+OPEN_STATUSES = ('draft', 'confirmed')
+
+
+def _hold_stock(db, product_id, qty):
+    """Claim ``qty`` units for an order. False when they are not available.
+
+    The condition and the claim are one statement on purpose: checking first and
+    updating after leaves a window for a second order to pass the same check.
+    """
+    cur = db.execute(
+        f"UPDATE products SET reserved_qty = reserved_qty + ?,"
+        f" updated_at = CURRENT_TIMESTAMP WHERE id = ? AND {AVAILABLE} >= ?",
+        (qty, product_id, qty))
+    return cur.rowcount > 0
+
+
+def _release_stock(db, product_id, qty):
+    """Give back units an order was holding.
+
+    Clamped at zero: a negative reservation would read as extra availability and
+    hand out stock that isn't there, which is worse than losing track of a release.
+    """
+    db.execute(
+        "UPDATE products SET reserved_qty = MAX(0, reserved_qty - ?),"
+        " updated_at = CURRENT_TIMESTAMP WHERE id = ?", (qty, product_id))
+
+
+def _release_order_holds(db, order_id):
+    """Release everything an open order was holding."""
+    for item in db.execute("SELECT product_id, quantity FROM order_items WHERE order_id = ?",
+                           (order_id,)).fetchall():
+        _release_stock(db, item['product_id'], item['quantity'])
+
+
+def _unavailable_error(db, product):
+    """The refusal for a line that could not be held.
+
+    Plain out-of-stock and stock-that-exists-but-is-spoken-for read identically on
+    the products page, and only the second one is something the seller can act on
+    (chase the open order holding it), so they get different messages.
+    """
+    row = db.execute("SELECT stock_qty, reserved_qty FROM products WHERE id = ?",
+                     (product['id'],)).fetchone()
+    if row['reserved_qty'] > 0:
+        return ServiceError('Only {n} of {name} available, {held} held by other orders',
+                            n=max(0, row['stock_qty'] - row['reserved_qty']),
+                            name=product['name'], held=row['reserved_qty'])
+    return ServiceError('Insufficient stock for {name}', name=product['name'])
+
+
+def _price_and_hold(db, items):
+    """Price ``items`` against current products and hold their stock.
+
+    Returns (rows, total) for insertion into order_items. Raises before any commit,
+    so the caller's rollback releases whatever was held on the way.
+    """
+    total = 0
+    rows = []
+    for item in items:
+        product = db.execute("SELECT * FROM products WHERE id = ?",
+                             (item['product_id'],)).fetchone()
+        if not product:
+            raise NotFoundError('Product {id} not found', id=item['product_id'])
+        if not _hold_stock(db, product['id'], item['quantity']):
+            raise _unavailable_error(db, product)
+        subtotal = product['price'] * item['quantity']
+        total += subtotal
+        # unit_cost is snapshotted alongside unit_price for the same reason: a later
+        # restock at a different price must not rewrite the margin of a sale already made.
+        rows.append((item['product_id'], item['quantity'], product['price'],
+                     product['cost_price'], subtotal))
+    return rows, total
+
+
 def list_orders(db, status=None, page=0, page_size=10):
     """Orders newest-first, optionally filtered by status. Returns (rows, has_more)."""
     query = "SELECT * FROM orders WHERE 1=1"
@@ -154,30 +235,59 @@ def get_order(db, order_id):
 def create_order(db, items):
     """items = [{'product_id': int, 'quantity': int}] (shape pre-validated by caller).
 
+    Holds the stock as it goes, so an order that is accepted can be filled.
     Returns {'order_id', 'total'}.
     """
-    total = 0
-    rows = []
-    for item in items:
-        product = db.execute("SELECT * FROM products WHERE id = ?", (item['product_id'],)).fetchone()
-        if not product:
-            raise NotFoundError('Product {id} not found', id=item['product_id'])
-        if product['stock_qty'] < item['quantity']:
-            raise ServiceError('Insufficient stock for {name}', name=product['name'])
-        subtotal = product['price'] * item['quantity']
-        total += subtotal
-        # unit_cost is snapshotted alongside unit_price for the same reason: a later
-        # restock at a different price must not rewrite the margin of a sale already made.
-        rows.append((item['product_id'], item['quantity'], product['price'],
-                     product['cost_price'], subtotal))
+    try:
+        rows, total = _price_and_hold(db, items)
+        cur = db.execute("INSERT INTO orders (status, total_amount) VALUES (?, ?)", ('draft', total))
+        order_id = cur.lastrowid
+        db.executemany("""
+            INSERT INTO order_items (order_id, product_id, quantity, unit_price, unit_cost, subtotal)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, [(order_id, pid, qty, price, cost, subtotal) for pid, qty, price, cost, subtotal in rows])
+        db.commit()
+    except Exception:
+        # Lines already held before the failing one would otherwise stay held against
+        # an order that was never written.
+        db.rollback()
+        raise
+    return {'order_id': order_id, 'total': total}
 
-    cur = db.execute("INSERT INTO orders (status, total_amount) VALUES (?, ?)", ('draft', total))
-    order_id = cur.lastrowid
-    db.executemany("""
-        INSERT INTO order_items (order_id, product_id, quantity, unit_price, unit_cost, subtotal)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, [(order_id, pid, qty, price, cost, subtotal) for pid, qty, price, cost, subtotal in rows])
-    db.commit()
+
+def update_order(db, order_id, items):
+    """Replace the lines of a draft order. Returns {'order_id', 'total'}.
+
+    Drafts only: confirming an order means the money has been taken, and the lines
+    are what the customer paid for. Cancel and re-enter if a confirmed order is wrong.
+
+    Every old line is released and every new one taken afresh, rather than working
+    out per-product deltas. Releasing first is what lets an edit that frees units
+    spend them again in the same breath -- dropping a line to add another of the last
+    item in stock, or just correcting 3 to 2 -- and rollback restores the old holds
+    exactly if any new line cannot be met.
+    """
+    order = db.execute("SELECT * FROM orders WHERE id = ?", (order_id,)).fetchone()
+    if not order:
+        raise NotFoundError('Order not found')
+    if order['status'] != 'draft':
+        raise ServiceError('Only draft orders can be edited')
+    try:
+        _release_order_holds(db, order_id)
+        # Re-priced from the products as they stand now: nothing has been sold yet,
+        # so an edited draft quotes today's price, exactly as a new order would.
+        rows, total = _price_and_hold(db, items)
+        db.execute("DELETE FROM order_items WHERE order_id = ?", (order_id,))
+        db.executemany("""
+            INSERT INTO order_items (order_id, product_id, quantity, unit_price, unit_cost, subtotal)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, [(order_id, pid, qty, price, cost, subtotal) for pid, qty, price, cost, subtotal in rows])
+        db.execute("UPDATE orders SET total_amount = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                   (total, order_id))
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     return {'order_id': order_id, 'total': total}
 
 
@@ -199,12 +309,16 @@ def complete_order(db, order_id):
         raise ServiceError('Only confirmed orders can be completed')
     items = db.execute("SELECT * FROM order_items WHERE order_id = ?", (order_id,)).fetchall()
     for item in items:
-        # Conditional decrement is atomic: no read-modify-write window for concurrent
-        # requests to double-count against.
+        # The hold becomes a real withdrawal: the units leave stock_qty and stop being
+        # reserved in the same statement, so no instant exists where they are counted
+        # in neither or in both. Conditional on stock_qty for the one case a hold does
+        # not cover -- self use or a stock adjustment physically removed the units
+        # since, and no column can conjure them back.
         cur = db.execute(
-            "UPDATE products SET stock_qty = stock_qty - ?, updated_at = CURRENT_TIMESTAMP"
+            "UPDATE products SET stock_qty = stock_qty - ?,"
+            " reserved_qty = MAX(0, reserved_qty - ?), updated_at = CURRENT_TIMESTAMP"
             " WHERE id = ? AND stock_qty >= ?",
-            (item['quantity'], item['product_id'], item['quantity']))
+            (item['quantity'], item['quantity'], item['product_id'], item['quantity']))
         if cur.rowcount == 0:
             db.rollback()
             raise ServiceError('Insufficient stock for product #{id}', id=item['product_id'])
@@ -222,6 +336,9 @@ def cancel_order(db, order_id):
         raise ServiceError('Cannot cancel completed orders')
     if order['status'] == 'cancelled':
         raise ServiceError('Order already cancelled')
+    # Whatever is cancellable is still open, so it is still holding its units; they go
+    # back to being available the moment the order stops laying claim to them.
+    _release_order_holds(db, order_id)
     db.execute("UPDATE orders SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (order_id,))
     db.commit()
 
