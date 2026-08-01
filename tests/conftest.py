@@ -44,7 +44,11 @@ def client(db_path):
     app_module.app.config["TESTING"] = True
     with app_module.app.test_client() as c:
         with c.session_transaction() as sess:
+            # Both keys, because that is what login() puts in a real session; a
+            # fixture with only user_id makes anything reading the username (the
+            # stock movement actor, for one) behave differently under test.
             sess["user_id"] = 1
+            sess["username"] = "admin"
         yield c
 
 

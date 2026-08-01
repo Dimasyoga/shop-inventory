@@ -391,3 +391,18 @@ def test_indexes_reach_a_database_that_had_no_self_use_tables(pre_reservation_db
         "SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%'")}
     assert "idx_self_use_items_batch" in names
     assert "idx_products_active_name" in names
+
+
+# --- The stock movement actor, on a database that never recorded one ---
+
+def test_the_actor_column_is_added_to_an_old_database(legacy_db):
+    cols = {r["name"] for r in query(legacy_db, "PRAGMA table_info(stock_logs)")}
+    assert "actor" in cols
+
+
+def test_movements_from_before_the_column_stay_unattributed(legacy_db):
+    """NULL means "written before this was recorded". Backfilling them with the
+    admin would make the column's history a guess, which is worse than a column
+    that admits where it starts."""
+    rows = query(legacy_db, "SELECT reason, actor FROM stock_logs")
+    assert rows == [{"reason": "sale order #3", "actor": None}]

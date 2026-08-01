@@ -92,6 +92,19 @@ def build_date_filter(start, end, column='o.created_at'):
     return f" AND {column} >= ? AND {column} < ?", (_to_utc_str(start), _to_utc_str(end))
 
 
+# --- Stock movement audit trail ---
+
+# Who caused a movement. 'web:<username>' from a route, 'telegram:<chat_id>' from the
+# bot, and this for anything with no request behind it -- a migration, a script, a
+# test. The default is deliberately honest rather than convenient: a call that did not
+# say who it was is not the admin, and recording a guess would make the column worse
+# than useless the one time somebody reads it.
+ACTOR_SYSTEM = 'system'
+
+STOCK_LOG_INSERT = ("INSERT INTO stock_logs (product_id, change_qty, reason, actor)"
+                    " VALUES (?, ?, ?, ?)")
+
+
 # --- Products ---
 
 # Products whose cost figure cannot be relied on, in the two ways that can happen:
@@ -330,7 +343,7 @@ def confirm_order(db, order_id):
     db.commit()
 
 
-def complete_order(db, order_id):
+def complete_order(db, order_id, *, actor=ACTOR_SYSTEM):
     order = db.execute("SELECT * FROM orders WHERE id = ?", (order_id,)).fetchone()
     if not order:
         raise NotFoundError('Order not found')
@@ -351,8 +364,8 @@ def complete_order(db, order_id):
         if cur.rowcount == 0:
             db.rollback()
             raise ServiceError('Insufficient stock for product #{id}', id=item['product_id'])
-        db.execute("INSERT INTO stock_logs (product_id, change_qty, reason) VALUES (?, ?, ?)",
-                   (item['product_id'], -item['quantity'], f'sale order #{order_id}'))
+        db.execute(STOCK_LOG_INSERT,
+                   (item['product_id'], -item['quantity'], f'sale order #{order_id}', actor))
     db.execute("UPDATE orders SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (order_id,))
     db.commit()
 
@@ -424,7 +437,7 @@ def _blend_cost(old_cost, stock_qty, new_unit_cost, qty):
     return (stock_qty * old_cost + qty * new_unit_cost) / (stock_qty + qty)
 
 
-def create_restock(db, items, discount=0, shipping_cost=0, admin_fee=0):
+def create_restock(db, items, discount=0, shipping_cost=0, admin_fee=0, *, actor=ACTOR_SYSTEM):
     """items = [{'product_id': int, 'qty': int, 'unit_price': float}] (shape pre-validated).
 
     Records the invoice, adds the stock, and rolls each product's cost_price forward as a
@@ -470,8 +483,8 @@ def create_restock(db, items, discount=0, shipping_cost=0, admin_fee=0):
             " allocated_cost, cost_before) VALUES (?, ?, ?, ?, ?, ?, ?)",
             (batch_id, product_id, line['qty'], line['unit_price'], line['unit_cost'],
              line['line_cost'], product['cost_price']))
-        db.execute("INSERT INTO stock_logs (product_id, change_qty, reason) VALUES (?, ?, ?)",
-                   (product_id, line['qty'], f'restock batch #{batch_id}'))
+        db.execute(STOCK_LOG_INSERT,
+                   (product_id, line['qty'], f'restock batch #{batch_id}', actor))
     db.commit()
     return {'batch_id': batch_id, 'subtotal': subtotal, 'total_cost': total_cost}
 
@@ -497,7 +510,7 @@ def _voidable_batch(db, table, batch_id):
     return batch
 
 
-def void_restock(db, batch_id):
+def void_restock(db, batch_id, *, actor=ACTOR_SYSTEM):
     """Reverse a restock batch that should not have been entered, and repair the cost.
 
     A void is a batch of its own carrying the negated figures, not an edit of the
@@ -553,8 +566,8 @@ def void_restock(db, batch_id):
             " allocated_cost, cost_before) VALUES (?, ?, ?, ?, ?, ?, 0)",
             (void_id, line['product_id'], -line['qty_added'], line['unit_price'],
              line['unit_cost'], -line['allocated_cost']))
-        db.execute("INSERT INTO stock_logs (product_id, change_qty, reason) VALUES (?, ?, ?)",
-                   (line['product_id'], -line['qty_added'], f'void of restock batch #{batch_id}'))
+        db.execute(STOCK_LOG_INSERT,
+                   (line['product_id'], -line['qty_added'], f'void of restock batch #{batch_id}', actor))
 
     restored, flagged, flagged_ids = [], [], []
     # dict.fromkeys keeps first-seen order: a batch may list a product twice, and only
@@ -629,7 +642,7 @@ def _sales_since(db, product_ids, since):
 
 # --- Self use ---
 
-def create_self_use(db, items):
+def create_self_use(db, items, *, actor=ACTOR_SYSTEM):
     """items = [{'product_id': int, 'qty': int}] (shape pre-validated by caller).
 
     Stock the seller took for themself: decrements stock and values each line at
@@ -674,13 +687,13 @@ def create_self_use(db, items):
         db.execute("INSERT INTO self_use_items (batch_id, product_id, quantity, unit_price, subtotal)"
                    " VALUES (?, ?, ?, ?, ?)",
                    (batch_id, product_id, qty, price, subtotal))
-        db.execute("INSERT INTO stock_logs (product_id, change_qty, reason) VALUES (?, ?, ?)",
-                   (product_id, -qty, f'self use batch #{batch_id}'))
+        db.execute(STOCK_LOG_INSERT,
+                   (product_id, -qty, f'self use batch #{batch_id}', actor))
     db.commit()
     return {'batch_id': batch_id, 'total_value': total_value}
 
 
-def void_self_use(db, batch_id):
+def void_self_use(db, batch_id, *, actor=ACTOR_SYSTEM):
     """Reverse a self-use batch, putting the stock back.
 
     The same reversing-batch shape as void_restock and much less to do: self use touches
@@ -704,8 +717,8 @@ def void_self_use(db, batch_id):
                    " subtotal) VALUES (?, ?, ?, ?, ?)",
                    (void_id, line['product_id'], -line['quantity'], line['unit_price'],
                     -line['subtotal']))
-        db.execute("INSERT INTO stock_logs (product_id, change_qty, reason) VALUES (?, ?, ?)",
-                   (line['product_id'], line['quantity'], f'void of self use batch #{batch_id}'))
+        db.execute(STOCK_LOG_INSERT,
+                   (line['product_id'], line['quantity'], f'void of self use batch #{batch_id}', actor))
     db.commit()
     return {'void_batch_id': void_id, 'total_value': -batch['total_value']}
 

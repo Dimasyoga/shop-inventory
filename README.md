@@ -175,7 +175,7 @@ The database is created automatically on first run. `database.py` handles:
 |---|---|
 | `users` | Authentication (username, password) |
 | `products` | Product catalog (SKU, sale price, cost price, stock, stock held by open orders, threshold, cost-review flag) |
-| `stock_logs` | Stock adjustment audit trail |
+| `stock_logs` | Stock movement audit trail (what moved, why, and who — `web:<user>` or `telegram:<id>`) |
 | `orders` | Order header (status, total) |
 | `order_items` | Order line items (price and cost snapshot per line) |
 | `restock_batches` | Restock batch header (invoice subtotal, discount, shipping, admin fee, total paid, void link) |

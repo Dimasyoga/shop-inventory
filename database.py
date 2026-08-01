@@ -147,6 +147,7 @@ def init_db():
             product_id INTEGER NOT NULL,
             change_qty INTEGER NOT NULL,
             reason TEXT,
+            actor TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (product_id) REFERENCES products(id)
         );
@@ -462,6 +463,17 @@ def init_db():
             c.execute("UPDATE settings SET value = ? WHERE key = ?",
                       (encrypt_secret(row[0]), key))
             log.info('encrypted setting %r at rest', key)
+
+    # Migrate: record who caused a stock movement. The web login is shared, but the
+    # Telegram whitelist can hold several people, so "who took this stock" already has
+    # more than one answer and the table could not say.
+    #
+    # Existing rows stay NULL, meaning "written before this was recorded". They are NOT
+    # backfilled with the admin: a column whose history is a guess is worse than one
+    # that admits where it starts.
+    stock_log_cols = [r[1] for r in c.execute("PRAGMA table_info(stock_logs)").fetchall()]
+    if 'actor' not in stock_log_cols:
+        c.execute("ALTER TABLE stock_logs ADD COLUMN actor TEXT")
 
     # Indexes. Last in init_db on purpose: several cover columns that the migrations
     # above add to an older database, and an index cannot be built on a column that

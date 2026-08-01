@@ -132,6 +132,14 @@ def _clear_login_failures(key):
     with _login_failures_lock:
         _login_failures.pop(key, None)
 
+def _actor():
+    """Who the current request is, for the stock movement audit trail.
+
+    The '?' is for a session that somehow has no username -- login_required means it
+    should not happen, and an unattributed movement is still better than none.
+    """
+    return f"web:{session.get('username', '?')}"
+
 def _json_body():
     """Parsed JSON object from the request, or None (caller returns 400)."""
     data = request.get_json(silent=True)
@@ -464,7 +472,7 @@ def api_stock_adjust():
         g.db.rollback()
         return _err('Insufficient stock')
     new_qty = g.db.execute("SELECT stock_qty FROM products WHERE id = ?", (product_id,)).fetchone()['stock_qty']
-    g.db.execute("INSERT INTO stock_logs (product_id, change_qty, reason) VALUES (?, ?, ?)", (product_id, change_qty, reason))
+    g.db.execute(services.STOCK_LOG_INSERT, (product_id, change_qty, reason, _actor()))
     g.db.commit()
     return jsonify({'success': True, 'new_qty': new_qty})
 
@@ -566,7 +574,7 @@ def api_confirm_order(id):
 @login_required
 def api_complete_order(id):
     try:
-        services.complete_order(g.db, id)
+        services.complete_order(g.db, id, actor=_actor())
     except ServiceError as e:
         return _service_error(e)
     return jsonify({'success': True})
@@ -617,7 +625,7 @@ def api_restock():
             return _err('Unit price must be 0 or more')
         validated.append({'product_id': product_id, 'qty': qty_added, 'unit_price': float(unit_price)})
     try:
-        result = services.create_restock(g.db, validated, **charges)
+        result = services.create_restock(g.db, validated, **charges, actor=_actor())
     except ServiceError as e:
         return _service_error(e)
     return jsonify({'success': True, 'total_cost': result['total_cost']})
@@ -626,7 +634,7 @@ def api_restock():
 @login_required
 def api_restock_void(id):
     try:
-        result = services.void_restock(g.db, id)
+        result = services.void_restock(g.db, id, actor=_actor())
     except ServiceError as e:
         return _service_error(e)
     return jsonify({'success': True, **result})
@@ -706,7 +714,7 @@ def api_self_use():
             return _err('Valid product and positive whole-number quantity required')
         validated.append({'product_id': product_id, 'qty': qty})
     try:
-        result = services.create_self_use(g.db, validated)
+        result = services.create_self_use(g.db, validated, actor=_actor())
     except ServiceError as e:
         return _service_error(e)
     return jsonify({'success': True, 'batch_id': result['batch_id'],
@@ -716,7 +724,7 @@ def api_self_use():
 @login_required
 def api_self_use_void(id):
     try:
-        result = services.void_self_use(g.db, id)
+        result = services.void_self_use(g.db, id, actor=_actor())
     except ServiceError as e:
         return _service_error(e)
     return jsonify({'success': True, **result})

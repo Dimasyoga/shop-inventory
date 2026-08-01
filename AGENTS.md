@@ -47,6 +47,15 @@ bilingual (English / Bahasa Indonesia).
   `i18n.month_name` / `weekday_abbr`, never `strftime('%b')`. Bot config
   (language, whitelist, token, timezone, thresholds) is re-read every poll cycle,
   so web-UI changes apply with no restart.
+- **Every stock movement records who caused it.** `stock_logs.actor` is
+  `web:<username>` from a route (`app._actor()`), `telegram:<chat_id>` from the bot
+  (`telegram_bot._actor(chat_id)`), or `services.ACTOR_SYSTEM` for anything with no
+  request behind it. The five service functions that write a movement take a
+  keyword-only `actor=ACTOR_SYSTEM`; the default is deliberately honest rather than
+  convenient, because crediting an unattributed call to the admin would make the
+  column worse than useless the one time somebody reads it. Rows from before the
+  column stay `NULL` and are **not** backfilled. This is forensic, read by SQL and
+  nothing else — which is why `stock_logs` is still deliberately unindexed.
 - **Lists are paged, and a page costs a fixed number of queries.** `list_orders`
   returns `(orders, has_more)` where each order is a dict already carrying its `items`,
   fetched for the whole page in one `IN` query — never one per row. `GET /api/orders`

@@ -198,6 +198,16 @@ class ChatStates:
 
 # --- Rendering helpers ---
 
+def _actor(chat_id):
+    """Who a bot action is, for the stock movement audit trail.
+
+    The chat id rather than a name: it is what the whitelist is written in, so a row
+    in stock_logs can be matched back to a Settings entry without guessing at
+    display names that Telegram lets people change.
+    """
+    return f'telegram:{chat_id}'
+
+
 def esc(s):
     return html.escape(str(s if s is not None else ''))
 
@@ -685,7 +695,7 @@ def _handle_callback(api, db, callback, tz, states, t):
             show(*screen_confirm(t('Complete order #{id}? Stock will be deducted.', id=parts[1]),
                                  f'of!:{parts[1]}', f'od:{parts[1]}', t))
         elif parts[0] == 'of!':
-            services.complete_order(db, int(parts[1]))
+            services.complete_order(db, int(parts[1]), actor=_actor(chat_id))
             ack(t('Order completed'))
             show(*screen_order_detail(db, int(parts[1]), t))
         elif parts[0] == 'ox?':
@@ -839,7 +849,7 @@ def _handle_flow_callback(api, db, callback, parts, states, show, ack, t):
                 ack(t('Order created'))
             elif flow == 'selfuse':
                 items = [{'product_id': pid, 'qty': qty} for pid, qty in state['items'].items()]
-                result = services.create_self_use(db, items)
+                result = services.create_self_use(db, items, actor=_actor(chat_id))
                 states.pop(chat_id)
                 show(t('✅ Self use <b>#{id}</b> saved — {total}',
                        id=result['batch_id'], total=format_rupiah(result['total_value'])),
@@ -853,7 +863,8 @@ def _handle_flow_callback(api, db, callback, parts, states, show, ack, t):
                          for pid, qty in state['items'].items()]
                 result = services.create_restock(
                     db, items, discount=state['discount'],
-                    shipping_cost=state['shipping'], admin_fee=state['admin_fee'])
+                    shipping_cost=state['shipping'], admin_fee=state['admin_fee'],
+                    actor=_actor(chat_id))
                 states.pop(chat_id)
                 show(t('✅ Restock batch <b>#{id}</b> saved — {cost}',
                        id=result['batch_id'], cost=format_rupiah(result['total_cost'])),
