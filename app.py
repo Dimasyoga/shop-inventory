@@ -6,9 +6,12 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from werkzeug.security import check_password_hash
 import logging
+import math
 import sqlite3
 import os
 import secrets
+import threading
+import time
 
 import i18n
 import reports
@@ -55,6 +58,79 @@ def login_required(f):
             return redirect(url_for('login'))
         return f(*args, **kwargs)
     return decorated
+
+# --- Login throttle ---
+# The shop runs on a LAN behind a single admin account, so unlimited password
+# guesses are the weakest thing in the app. Failures are bucketed by client
+# address, not by username: a per-username counter would let anyone lock the
+# owner out of their own shop just by guessing at the name, while an address
+# bucket only ever penalises the machine doing the guessing.
+#
+# State is in process memory rather than a settings row on purpose. The
+# deployment pins one worker (see AGENTS.md), so there is nothing to share it
+# with, and a lockout that survived a restart would need an operator with host
+# access to clear -- restarting is deliberately the way out when the shop owner
+# locks themself out.
+LOGIN_MAX_ATTEMPTS = 5
+# Doubles as the window a failure keeps counting for and the wait once the limit
+# is reached: five failures inside 15 minutes lock the bucket, and the lock lifts
+# 15 minutes after the last attempt. One horizon, so there is no gap where a
+# failure still counts but no longer holds the door shut.
+LOGIN_LOCKOUT = 15 * 60
+
+_login_failures = {}  # client key -> monotonic timestamps of failures still counting
+_login_failures_lock = threading.Lock()
+
+def _login_now():
+    """Clock for the throttle. Monotonic, so moving the system clock cannot cut a
+    lockout short, and a seam the tests replace."""
+    return time.monotonic()
+
+def _login_key():
+    """Bucket an attempt belongs to. Note this is the peer address: behind a
+    reverse proxy every request carries the proxy's, putting the whole LAN in one
+    bucket -- the deployment publishes the port directly for that reason."""
+    return request.remote_addr or 'unknown'
+
+def _recent_failures(key, now):
+    """Failures still counting against ``key``, pruned in place.
+
+    Caller holds ``_login_failures_lock``.
+    """
+    recent = [t for t in _login_failures.get(key, []) if now - t < LOGIN_LOCKOUT]
+    if recent:
+        _login_failures[key] = recent
+    else:
+        _login_failures.pop(key, None)
+    return recent
+
+def _login_lockout_remaining(key, now=None):
+    """Seconds before ``key`` may try again; 0 when it may try now."""
+    now = _login_now() if now is None else now
+    with _login_failures_lock:
+        recent = _recent_failures(key, now)
+        if len(recent) < LOGIN_MAX_ATTEMPTS:
+            return 0
+        return max(0.0, LOGIN_LOCKOUT - (now - recent[-1]))
+
+def _record_login_failure(key, now=None):
+    """Count a failed attempt against ``key`` and return its running total."""
+    now = _login_now() if now is None else now
+    with _login_failures_lock:
+        recent = _recent_failures(key, now)
+        recent.append(now)
+        _login_failures[key] = recent
+        # Buckets go stale as clients come and go, and nothing else ever revisits
+        # them; drop them here so the map cannot grow without bound.
+        for stale in [k for k, times in _login_failures.items()
+                      if k != key and now - times[-1] >= LOGIN_LOCKOUT]:
+            del _login_failures[stale]
+        return len(recent)
+
+def _clear_login_failures(key):
+    """Forget a bucket's history, on a sign-in that succeeded."""
+    with _login_failures_lock:
+        _login_failures.pop(key, None)
 
 def _json_body():
     """Parsed JSON object from the request, or None (caller returns 400)."""
@@ -167,15 +243,29 @@ def login():
     if 'user_id' in session:
         return redirect(url_for('dashboard'))
     if request.method == 'POST':
+        t = i18n.make_t(get_lang())
+        key = _login_key()
+        remaining = _login_lockout_remaining(key)
+        if remaining:
+            # Refused before the password is looked at, so a locked-out guesser
+            # cannot use the throttle itself to tell a right password from a wrong
+            # one. Round up, so the message never invites a retry that is refused.
+            return render_template('login.html', error=t(
+                'Too many failed sign-in attempts. Try again in {n} minute(s).',
+                n=max(1, math.ceil(remaining / 60)))), 429
         username = request.form.get('username', '')
         password = request.form.get('password', '')
         db = g.db
         user = db.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
         if user and check_password_hash(user['password'], password):
+            _clear_login_failures(key)
             session['user_id'] = user['id']
             session['username'] = user['username']
             return redirect(url_for('dashboard'))
-        return render_template('login.html', error=i18n.make_t(get_lang())('Invalid credentials'))
+        failures = _record_login_failure(key)
+        if failures >= LOGIN_MAX_ATTEMPTS:
+            log.warning('sign-in locked out for %s after %d failed attempts', key, failures)
+        return render_template('login.html', error=t('Invalid credentials'))
     return render_template('login.html', error=None)
 
 @app.route('/logout')

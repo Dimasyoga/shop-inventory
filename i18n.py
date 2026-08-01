@@ -40,6 +40,8 @@ TRANSLATIONS = {
         'Password': 'Kata sandi',
         'Sign In': 'Masuk',
         'Invalid credentials': 'Kredensial tidak valid',
+        'Too many failed sign-in attempts. Try again in {n} minute(s).':
+            'Terlalu banyak percobaan masuk yang gagal. Coba lagi dalam {n} menit.',
 
         # --- Common ---
         'Name': 'Nama',

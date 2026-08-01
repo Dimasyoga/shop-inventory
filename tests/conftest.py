@@ -5,6 +5,17 @@ import database
 import reports
 
 
+@pytest.fixture(autouse=True)
+def reset_login_throttle():
+    """The failed-sign-in map is module state on a process that outlives any one
+    test, and every test client shares the same address. Without this, a test that
+    mistypes a password leaves failures counting against the next one.
+    """
+    app_module._login_failures.clear()
+    yield
+    app_module._login_failures.clear()
+
+
 @pytest.fixture
 def db_path(tmp_path, monkeypatch):
     """Point the app at a throwaway database.

@@ -438,6 +438,14 @@ All variables are documented in `.env.example`. Summary:
 - **This is a LAN deployment.** There is no TLS and session cookies are not marked
   `Secure`. Don't port-forward it to the internet without putting a reverse proxy
   with HTTPS in front and setting `SESSION_COOKIE_SECURE`.
+- **Sign-ins are rate limited.** Five failed attempts from one device inside 15
+  minutes lock that device out of the login form for 15 minutes, correct password
+  included. The count is per device address, so a neighbour guessing at the
+  password cannot lock you out of your own machine; it lives in memory, so
+  `docker compose restart app` clears it if you lock yourself out. Note that a
+  reverse proxy in front of the app makes every request look like it comes from
+  the proxy, which would put every device in one shared bucket — forward the real
+  address if you add one.
 - **Never set `FLASK_DEBUG`** on a deployed instance — it exposes the Werkzeug
   console, which is remote code execution for anyone who can reach the port.
 

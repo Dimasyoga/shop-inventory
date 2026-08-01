@@ -74,6 +74,14 @@ bilingual (English / Bahasa Indonesia).
   *Needs cost* chip (`services.NEEDS_COST`) asks for a human. Resist any change that
   makes the flag clear itself — only an explicit cost on the product form does, because
   a later restock blends onto the suspect base and inherits the doubt.
+- **The login throttle buckets by client address, not username.** Five failures in
+  15 minutes lock the bucket (`app._login_failures`), and a lockout refuses the
+  *correct* password too — checking credentials first would make the throttle an
+  oracle for whether a guess was right. Keying it on the username instead would
+  hand anyone a way to lock the shop owner out of their own shop, which is why it
+  is not. The map is process memory, justified by the one-worker rule below;
+  `tests/conftest.py` clears it around every test, since the process outlives them
+  and every test client shares one address.
 - **`ServiceError`** carries an English `template` + `params` for translation via
   `i18n.translate_error`; `str(e)` still yields English for logs.
 - **The bot poller** advances its update offset even when handling an update
