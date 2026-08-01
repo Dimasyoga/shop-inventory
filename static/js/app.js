@@ -131,11 +131,40 @@ function saveAccount(e) {
 // survives typing in it. Deep-linkable as /products?needs_cost=1 so the uncosted-sales
 // notes on the dashboard and sales page can point straight at the work.
 let needsCostOnly = false;
+let archivedOnly = false;
+
+// The two views are exclusive: "Needs cost" counts active products only, so combining
+// them would always come back empty and read as a bug.
+function setChip(id, on) {
+    const chip = document.getElementById(id);
+    if (chip) chip.classList.toggle('active', on);
+}
 
 function toggleNeedsCost() {
     needsCostOnly = !needsCostOnly;
-    document.getElementById('needsCostChip').classList.toggle('active', needsCostOnly);
+    if (needsCostOnly) archivedOnly = false;
+    setChip('needsCostChip', needsCostOnly);
+    setChip('archivedChip', archivedOnly);
     loadProducts();
+}
+
+function toggleArchived() {
+    archivedOnly = !archivedOnly;
+    if (archivedOnly) needsCostOnly = false;
+    setChip('archivedChip', archivedOnly);
+    setChip('needsCostChip', needsCostOnly);
+    loadProducts();
+}
+
+function restoreProduct(id) {
+    if (!confirm(t('Restore this product to the catalogue?'))) return;
+    fetchJson(`/api/products/${id}/restore`, { method: 'POST' })
+        .then(() => {
+            showToast(t('Product restored'), 'success');
+            // Reload the page: both chip counts moved, and they are rendered server-side.
+            location.reload();
+        })
+        .catch(err => showToast(err.message, 'error'));
 }
 
 // Two different problems, and conflating them would hide the worse one: no cost at all
@@ -155,24 +184,30 @@ function loadProducts() {
     let url = '/api/products?';
     if (search) url += 'search=' + encodeURIComponent(search) + '&';
     if (needsCostOnly) url += 'needs_cost=1&';
+    if (archivedOnly) url += 'archived=1&';
     fetch(url).then(r => r.json()).then(products => {
         const tbody = document.getElementById('productsBody');
         if (!products.length) {
-            const empty = needsCostOnly ? t('Every product has a cost recorded') : t('No products found');
+            let empty = t('No products found');
+            if (needsCostOnly) empty = t('Every product has a cost recorded');
+            else if (archivedOnly) empty = t('No archived products');
             tbody.innerHTML = `<tr><td colspan="6" class="empty-row">${empty}</td></tr>`;
             return;
         }
+        // An archived product is out of the catalogue: editing or re-archiving it makes
+        // no sense, so the only thing offered is putting it back.
+        const actions = p => archivedOnly
+            ? `<button class="btn-icon" onclick="restoreProduct(${p.id})" title="${t('Restore')}">♻️</button>`
+            : `<button class="btn-icon" onclick="editProduct(${p.id})" title="${t('Edit')}">✏️</button>
+               <button class="btn-icon" onclick="deleteProduct(${p.id})" title="${t('Archive')}">🗑️</button>`;
         tbody.innerHTML = products.map(p => `
-            <tr>
+            <tr${archivedOnly ? ' class="row-archived"' : ''}>
                 <td>${escapeHtml(p.sku || '-')}</td>
                 <td>${escapeHtml(p.name)}</td>
                 <td>${formatRupiah(p.price)}</td>
                 ${costCell(p)}
                 <td>${p.stock_qty}</td>
-                <td class="action-cell">
-                    <button class="btn-icon" onclick="editProduct(${p.id})" title="${t('Edit')}">✏️</button>
-                    <button class="btn-icon" onclick="deleteProduct(${p.id})" title="${t('Archive')}">🗑️</button>
-                </td>
+                <td class="action-cell">${actions(p)}</td>
             </tr>
         `).join('');
     });

@@ -16,6 +16,12 @@
             {{ t('Needs cost') }} ({{ needs_cost_count }})
         </button>
         {% endif %}
+        {% if archived_count %}
+        <button type="button" class="filter-chip chip-neutral" id="archivedChip" onclick="toggleArchived()"
+                title="{{ t('Products hidden from the catalogue — restore one to bring it back') }}">
+            {{ t('Archived') }} ({{ archived_count }})
+        </button>
+        {% endif %}
     </div>
     <table class="data-table" id="productsTable">
         <thead>

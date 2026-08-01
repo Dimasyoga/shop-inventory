@@ -1,9 +1,13 @@
-"""Surfacing products whose cost cannot be relied on.
+"""The products page: the two filtered views and the archive round trip.
 
-The profit figures already say how many sales they dropped for want of a cost; this is
-the other half -- which products to go and fix. Two conditions qualify, and they are
-deliberately not the same thing: nothing was ever recorded (cost_price 0, which reads as
-"unknown" everywhere else), or a void left a figure standing that is merely suspect.
+*Needs cost* is the other half of the profit figures, which say how many sales they
+dropped for want of a cost but never which products to fix. Two conditions qualify, and
+they are deliberately not the same thing: nothing was ever recorded (cost_price 0, which
+reads as "unknown" everywhere else), or a void left a figure standing that is merely
+suspect.
+
+*Archived* exists because archiving used to be one-way: the product vanished from every
+list with no route to bring it back, so a misclick needed SQLite by hand.
 """
 import database
 import services
@@ -89,6 +93,54 @@ def test_editing_without_a_cost_leaves_the_flag_alone(client, db_path):
     row = conn.execute("SELECT cost_review_needed FROM products WHERE id = ?", (pid,)).fetchone()
     conn.close()
     assert row['cost_review_needed'] == 1
+
+
+# --- Archive and restore ---
+
+def test_archiving_hides_a_product_and_restoring_brings_it_back(client, db_path):
+    pid = product(name='Gone')
+    client.delete(f'/api/products/{pid}')
+    assert names(client) == set()
+    assert names(client, archived=1) == {'Gone'}
+
+    assert client.post(f'/api/products/{pid}/restore').status_code == 200
+    assert names(client) == {'Gone'}
+    assert names(client, archived=1) == set()
+
+
+def test_restoring_keeps_the_stock_and_cost_it_was_archived_with(client, db_path):
+    """Archiving is a soft delete -- nothing about the product changed while it was away."""
+    pid = product(name='Gone', cost_price=7500, stock_qty=9)
+    client.delete(f'/api/products/{pid}')
+    client.post(f'/api/products/{pid}/restore')
+    row = client.get('/api/products').get_json()[0]
+    assert (row['cost_price'], row['stock_qty']) == (7500, 9)
+
+
+def test_restoring_a_product_that_is_not_archived_is_404(client, db_path):
+    pid = product(name='Active')
+    res = client.post(f'/api/products/{pid}/restore')
+    assert res.status_code == 404
+    assert 'error' in res.get_json()
+
+
+def test_restoring_a_missing_product_is_404(client, db_path):
+    assert client.post('/api/products/999/restore').status_code == 404
+
+
+def test_the_archived_view_composes_with_search(client, db_path):
+    a = product(name='Kopi Lama')
+    b = product(name='Gula Lama')
+    client.delete(f'/api/products/{a}')
+    client.delete(f'/api/products/{b}')
+    assert names(client, archived=1, search='Kopi') == {'Kopi Lama'}
+
+
+def test_the_products_page_offers_the_archived_chip_only_when_there_is_one(client, db_path):
+    pid = product(name='Gone')
+    assert 'archivedChip' not in client.get('/products').get_data(as_text=True)
+    client.delete(f'/api/products/{pid}')
+    assert 'Archived (1)' in client.get('/products').get_data(as_text=True)
 
 
 def test_count_needs_cost_matches_the_filter(client, db_path):

@@ -119,6 +119,14 @@ TRANSLATIONS = {
         'Product saved': 'Produk tersimpan',
         'Archive this product?': 'Arsipkan produk ini?',
         'Product archived': 'Produk diarsipkan',
+        'Archived': 'Diarsipkan',
+        'Products hidden from the catalogue — restore one to bring it back':
+            'Produk yang disembunyikan dari katalog — pulihkan untuk mengembalikannya',
+        'No archived products': 'Tidak ada produk yang diarsipkan',
+        'Restore': 'Pulihkan',
+        'Restore this product to the catalogue?': 'Pulihkan produk ini ke katalog?',
+        'Product restored': 'Produk dipulihkan',
+        'Product not found or not archived': 'Produk tidak ditemukan atau tidak diarsipkan',
 
         # --- Orders ---
         '+ New Order': '+ Pesanan Baru',

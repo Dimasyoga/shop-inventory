@@ -215,6 +215,10 @@ The server starts at `http://localhost:5000`. Default login: **admin** / **admin
   dashboard and sales page link straight into this filtered view
 - Stock adjustment modal for manual corrections (shows warning about cost accuracy)
 - Archive products (soft delete) instead of permanent deletion
+- **Archived** filter chip lists what has been archived, with ♻️ to restore one to the
+  catalogue. Stock, cost and history come back exactly as they were — archiving only
+  ever hid the product. A restore cannot clash on SKU either: the uniqueness rule covers
+  archived products too, so nothing can have taken the SKU while it was away
 
 #### Orders (`/orders`)
 - Search by order number, filter by status
@@ -476,6 +480,7 @@ docker compose logs -f app
 3. Click **Save** → product appears in catalog
 4. To edit, click ✏️ icon; to adjust stock directly, click 📊 icon (use Restock page for normal additions to maintain cost accuracy)
 5. To archive, click 🗑️ → product is hidden but data preserved
+6. To undo that, open the **Archived** chip above the table and click ♻️ on the product
 
 ### Restocking Inventory
 

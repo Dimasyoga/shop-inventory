@@ -235,16 +235,23 @@ def dashboard():
 def products_page():
     products = g.db.execute(
         "SELECT * FROM products WHERE is_archived = 0 ORDER BY name").fetchall()
+    archived_count = g.db.execute(
+        "SELECT COUNT(*) AS n FROM products WHERE is_archived = 1").fetchone()['n']
     return render_template('products.html', products=products,
                            needs_cost_count=services.count_needs_cost(g.db),
+                           archived_count=archived_count,
                            format_rupiah=format_rupiah)
 
 @app.route('/api/products', methods=['GET'])
 @login_required
 def api_products():
     search = request.args.get('search', '')
-    query = "SELECT * FROM products WHERE is_archived = 0"
-    params = []
+    # Archived products are browsable on their own rather than mixed in: the point of
+    # archiving is to get them out of the working catalogue, and the only thing to do
+    # with one is put it back.
+    archived = 1 if request.args.get('archived') == '1' else 0
+    query = "SELECT * FROM products WHERE is_archived = ?"
+    params = [archived]
     if search:
         query += " AND (name LIKE ? OR sku LIKE ?)"
         params.extend([f'%{search}%', f'%{search}%'])
@@ -320,6 +327,19 @@ def api_update_product(id):
 def api_delete_product(id):
     g.db.execute("UPDATE products SET is_archived = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (id,))
     g.db.commit()
+    return jsonify({'success': True})
+
+@app.route('/api/products/<int:id>/restore', methods=['POST'])
+@login_required
+def api_restore_product(id):
+    """Undo an archive. Never conflicts: the SKU unique index covers archived rows too,
+    so nothing can have taken the SKU while this product was away."""
+    cur = g.db.execute(
+        "UPDATE products SET is_archived = 0, updated_at = CURRENT_TIMESTAMP"
+        " WHERE id = ? AND is_archived = 1", (id,))
+    g.db.commit()
+    if cur.rowcount == 0:
+        return _err('Product not found or not archived', 404)
     return jsonify({'success': True})
 
 # --- Stock Adjustment ---
