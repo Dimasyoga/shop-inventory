@@ -227,7 +227,7 @@ def test_stock_history_requires_login(db_path):
     app_module.app.config["TESTING"] = True
     with app_module.app.test_client() as anon:
         assert anon.get('/stock-history').status_code == 302
-        assert anon.get('/api/stock/movements').status_code == 302
+        assert anon.get('/api/stock/movements').status_code == 401
 
 
 def test_a_manual_adjustment_records_its_typed_reason_and_actor(client, db_path):

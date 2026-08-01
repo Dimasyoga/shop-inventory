@@ -365,6 +365,8 @@ TRANSLATIONS = {
         'No stock movements recorded': 'Belum ada pergerakan stok tercatat',
         'unknown': 'tidak diketahui',
         'Invalid product': 'Produk tidak valid',
+        'Your session has expired. Please sign in again.':
+            'Sesi Anda telah berakhir. Silakan masuk kembali.',
 
         # --- Telegram bot screens ---
         'What do you want to do?': 'Apa yang ingin Anda lakukan?',

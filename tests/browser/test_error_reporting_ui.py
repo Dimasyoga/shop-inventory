@@ -76,6 +76,33 @@ def test_a_successful_write_still_reports_success(page, shop):
     assert shop.stock_of(kopi) == (10, 2)
 
 
+def test_an_expired_session_lands_on_the_login_page(page, shop):
+    """Sessions now time out, so this is a routine morning at the shop rather than an
+    edge case. The old behaviour was a toast reading like a JSON parse error, because
+    fetch() followed the redirect and tried to parse the login page as JSON."""
+    kopi = shop.product('Kopi', 'K-1', stock=10)
+    page.goto(f'{shop.base_url}/orders')
+
+    page.context.clear_cookies()  # the session aged out while the page sat open
+
+    page.get_by_role('button', name='+ New Order').click()
+    page.wait_for_url('**/login')
+    assert page.locator('input[name="username"]').is_visible()
+    assert shop.stock_of(kopi) == (10, 0)
+
+
+def test_an_expired_session_does_not_toast_a_parse_error(page, shop):
+    shop.product('Kopi', 'K-1', stock=10)
+    page.goto(f'{shop.base_url}/orders')
+    page.context.clear_cookies()
+
+    page.get_by_role('button', name='+ New Order').click()
+    page.wait_for_url('**/login')
+    # goToLogin() hands back a promise that never settles precisely so nothing
+    # toasts against a page already navigating away.
+    expect(page.locator('.toast')).to_have_count(0)
+
+
 def test_no_unhandled_rejection_reaches_the_console(page, shop):
     """The symptom that gave the bug away: the refusal surfaced as an uncaught error in
     devtools instead of a toast in the page."""

@@ -375,5 +375,5 @@ def test_report_routes_require_login(db_path):
     app_module.app.config["TESTING"] = True
     with app_module.app.test_client() as anon:
         # login_required redirects rather than 401s, so assert on the redirect.
-        assert anon.get("/api/reports/monthly").status_code == 302
-        assert anon.post("/api/reports/monthly/send", json={}).status_code == 302
+        assert anon.get("/api/reports/monthly").status_code == 401
+        assert anon.post("/api/reports/monthly/send", json={}).status_code == 401

@@ -476,6 +476,11 @@ All variables are documented in `.env.example`. Summary:
 - **This is a LAN deployment.** There is no TLS and session cookies are not marked
   `Secure`. Don't port-forward it to the internet without putting a reverse proxy
   with HTTPS in front and setting `SESSION_COOKIE_SECURE`.
+- **Sessions time out after 12 hours idle.** The clock restarts on every request, so
+  the timeout only catches a machine nobody is using — a till left signed in overnight
+  asks for the password in the morning, but nobody is signed out mid-order. Change it
+  with `SHOP_SESSION_HOURS` in `.env` (a restart applies it, and shortening it also
+  invalidates sessions already issued).
 - **Sign-ins are rate limited.** Five failed attempts from one device inside 15
   minutes lock that device out of the login form for 15 minutes, correct password
   included. The count is per device address, so a neighbour guessing at the

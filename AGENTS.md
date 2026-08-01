@@ -159,6 +159,18 @@ bilingual (English / Bahasa Indonesia).
   separate actions in Settings on purpose — the figure says what customers were
   promised, so it gets shown before anything rewrites it. Resist making repair
   automatic for the same reason `cost_review_needed` does not clear itself.
+- **Sessions are an idle window, and API routes answer 401 rather than redirecting.**
+  `app.permanent_session_lifetime` is `SHOP_SESSION_HOURS` (default 12) and sign-in sets
+  `session.permanent = True`; Flask checks the window against the cookie's own signature
+  on every request, so it holds server-side, and `SESSION_REFRESH_EACH_REQUEST` re-issues
+  the cookie each response so working restarts the clock. An absolute limit would sign
+  the seller out mid-order. `app._unauthenticated()` splits on the `/api/` prefix: a page
+  gets the login screen, a fetch gets 401 JSON, because a redirect returns 200 and an
+  HTML body that `api()` then fails to parse — reporting a JSON syntax error to someone
+  whose actual problem is that they need to sign in. `goToLogin()` in `app.js` handles
+  the 401 by navigating and returning a promise that **never settles**, so no caller's
+  `.catch` toasts against a page already leaving. Any new client-side `fetch` must go
+  through `api`/`fetchJson` or repeat that 401 check.
 - **The login throttle buckets by client address, not username.** Five failures in
   15 minutes lock the bucket (`app._login_failures`), and a lockout refuses the
   *correct* password too — checking credentials first would make the throttle an

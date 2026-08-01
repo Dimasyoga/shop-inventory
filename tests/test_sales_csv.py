@@ -181,7 +181,7 @@ def test_it_needs_a_login(db_path):
     import app as app_module
     app_module.app.config['TESTING'] = True
     with app_module.app.test_client() as anon:
-        assert anon.get('/api/reports/monthly.csv').status_code == 302
+        assert anon.get('/api/reports/monthly.csv').status_code == 401
 
 
 # --- Shared ground with the PDF ---

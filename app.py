@@ -2,7 +2,7 @@ from flask import (Flask, request, jsonify, render_template, redirect, url_for,
                    session, g, Response)
 from database import get_db, init_db
 from functools import wraps
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from werkzeug.security import check_password_hash
 import logging
@@ -51,13 +51,42 @@ app = Flask(__name__)
 app.secret_key = _load_secret_key()
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 
+# How long a session survives without activity. Flask checks this against the
+# signature's own timestamp on every request, so it holds server-side even if the
+# browser keeps sending an old cookie -- and the default, had we left it, is 31 days.
+#
+# It is an *idle* timeout, not an absolute one: sessions are marked permanent at sign-in
+# and Flask's SESSION_REFRESH_EACH_REQUEST (on by default) re-issues the cookie on every
+# response, so the clock restarts while the shop is being used. An absolute limit would
+# sign the seller out mid-order for no reason anyone at the counter could understand.
+#
+# Twelve hours covers a trading day and expires overnight. Deployment-level rather than
+# a settings row because Flask reads it off app.config, which a running process does not
+# revisit -- and unlike the bot's settings, nobody needs to change this while serving.
+SESSION_HOURS = float(os.environ.get('SHOP_SESSION_HOURS') or 12)
+app.permanent_session_lifetime = timedelta(hours=SESSION_HOURS)
+
 def login_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         if 'user_id' not in session:
-            return redirect(url_for('login'))
+            return _unauthenticated()
         return f(*args, **kwargs)
     return decorated
+
+def _unauthenticated():
+    """Turn away a request with no session, in the shape its caller can use.
+
+    A page navigation gets the login screen. A fetch() gets 401 JSON, because the
+    redirect it would otherwise follow returns 200 and an HTML body -- `api()` then
+    fails parsing it and reports a JSON syntax error to a seller whose actual problem
+    is that they need to sign in again. Rare enough to ignore while sessions lasted a
+    month; the whole point of this change is to make it routine.
+    """
+    if request.path.startswith('/api/'):
+        return jsonify({'error': i18n.make_t(get_lang())(
+            'Your session has expired. Please sign in again.')}), 401
+    return redirect(url_for('login'))
 
 # --- Login throttle ---
 # The shop runs on a LAN behind a single admin account, so unlimited password
@@ -272,6 +301,11 @@ def login():
         user = db.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
         if user and check_password_hash(user['password'], password):
             _clear_login_failures(key)
+            # permanent is what gives the cookie an expiry the browser also honours,
+            # and what makes Flask re-issue it on each response so the idle clock
+            # restarts while the seller is working. Without it the cookie lives until
+            # the browser closes -- which on a counter PC is never.
+            session.permanent = True
             session['user_id'] = user['id']
             session['username'] = user['username']
             return redirect(url_for('dashboard'))

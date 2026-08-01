@@ -219,8 +219,8 @@ def test_repair_endpoint_fixes_and_reports(client, db_path):
 def test_reservation_routes_require_login(db_path):
     app_module.app.config["TESTING"] = True
     with app_module.app.test_client() as anon:
-        assert anon.get('/api/stock/reservations/check').status_code == 302
-        assert anon.post('/api/stock/reservations/repair').status_code == 302
+        assert anon.get('/api/stock/reservations/check').status_code == 401
+        assert anon.post('/api/stock/reservations/repair').status_code == 401
 
 
 def test_startup_warning_does_not_raise_when_the_database_is_unreachable(monkeypatch):

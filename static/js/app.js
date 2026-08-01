@@ -50,10 +50,18 @@ function escapeHtml(s) {
    is a trap, because the failure branch is unreachable and the rejection goes nowhere.
    Eight call sites were written that way and swallowed every refusal the server made,
    which is what tests/browser exists to catch. */
-async function api(url, method = 'GET', body = null) {
-    const opts = { method, headers: { 'Content-Type': 'application/json' } };
-    if (body) opts.body = JSON.stringify(body);
-    const res = await fetch(url, opts);
+/* The session expired mid-page. Send the seller to sign in rather than toasting a
+   failure they cannot act on, and hand back a promise that never settles so no
+   caller's .catch fires a message against a page already navigating away. */
+function goToLogin() {
+    window.location = '/login';
+    return new Promise(() => {});
+}
+
+/* Shared by both helpers so a refusal reads the same whoever asked: the server's own
+   translated message where there is one, its status code where there is not. */
+async function jsonOrThrow(res) {
+    if (res.status === 401) return goToLogin();
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || t('Request failed ({status})', { status: res.status }));
@@ -61,13 +69,17 @@ async function api(url, method = 'GET', body = null) {
     return res.json();
 }
 
+async function api(url, method = 'GET', body = null) {
+    const opts = { method, headers: { 'Content-Type': 'application/json' } };
+    if (body) opts.body = JSON.stringify(body);
+    return jsonOrThrow(await fetch(url, opts));
+}
+
 /* Wraps a fetch of JSON that renders into the page, surfacing failures as a toast
-   instead of an unhandled rejection. */
+   instead of an unhandled rejection. Still rethrows, so a caller that would go on to
+   render nothing can bail; add .catch(() => {}) when there is nothing more to do. */
 function fetchJson(url) {
-    return fetch(url).then(res => {
-        if (!res.ok) throw new Error(t('Request failed ({status})', { status: res.status }));
-        return res.json();
-    }).catch(err => {
+    return fetch(url).then(jsonOrThrow).catch(err => {
         showToast(err.message, 'error');
         throw err;
     });
@@ -248,7 +260,7 @@ function loadProducts() {
     if (search) url += 'search=' + encodeURIComponent(search) + '&';
     if (needsCostOnly) url += 'needs_cost=1&';
     if (archivedOnly) url += 'archived=1&';
-    fetch(url).then(r => r.json()).then(products => {
+    fetchJson(url).then(products => {
         const tbody = document.getElementById('productsBody');
         if (!products.length) {
             let empty = t('No products found');
@@ -273,7 +285,7 @@ function loadProducts() {
                 <td class="action-cell">${actions(p)}</td>
             </tr>
         `).join('');
-    });
+    }).catch(() => { /* fetchJson has toasted; there is no table to draw */ });
 }
 
 // Opening stock is inventory that was paid for, and a sale snapshots its cost at order
@@ -379,7 +391,7 @@ function loadOrders() {
     let url = '/api/orders?page=' + ordersPage + '&';
     if (search) url += 'search=' + encodeURIComponent(search) + '&';
     if (status) url += 'status=' + status + '&';
-    fetch(url).then(r => r.json()).then(data => {
+    fetchJson(url).then(data => {
         const orders = data.orders || [];
         const tbody = document.getElementById('ordersBody');
         renderOrdersPager(data.has_more, orders.length);
@@ -407,7 +419,7 @@ function loadOrders() {
                 </td>
             </tr>
         `).join('');
-    });
+    }).catch(() => { /* fetchJson has toasted; there is no list to draw */ });
 }
 
 // Hidden entirely on a single page of results: a pager offering nothing to page to
@@ -494,7 +506,11 @@ function availableFor(p) {
 // writes an order -- a second device, or the Telegram bot. The form refetches it on
 // every open so the seller is never choosing from numbers that have moved on.
 function refreshProducts() {
-    return fetch('/api/products').then(r => r.json())
+    return fetch('/api/products')
+        // Not fetchJson: a failure here is survivable, and toasting it would talk over
+        // the modal that is opening. An expired session is not survivable, though --
+        // the form would offer a catalogue nothing can be saved against.
+        .then(res => (res.status === 401 ? goToLogin() : res.json()))
         .then(rows => { PRODUCTS = rows; })
         .catch(() => { /* keep the page's copy; the server still enforces the hold */ });
 }
@@ -504,10 +520,9 @@ function newOrder() {
 }
 
 function editOrder(id) {
-    fetch('/api/orders/' + id).then(r => r.json()).then(o => {
-        if (!o || o.error) return showToast(o && o.error ? o.error : t('Order not found'), 'error');
-        refreshProducts().then(() => openOrderModal(o));
-    });
+    fetchJson('/api/orders/' + id)
+        .then(o => refreshProducts().then(() => openOrderModal(o)))
+        .catch(() => { /* fetchJson has toasted; there is no order to open */ });
 }
 
 function openOrderModal(order) {
@@ -638,8 +653,7 @@ function cancelOrder(id) {
 }
 
 function viewOrder(id) {
-    fetch('/api/orders/' + id).then(r => r.json()).then(o => {
-        if (!o || o.error) return showToast(o && o.error ? o.error : t('Order not found'), 'error');
+    fetchJson('/api/orders/' + id).then(o => {
         document.getElementById('detailOrderId').textContent = t('Order ID {id}', { id: o.id });
         let html = `
             <p><strong>${t('Status')}:</strong> <span class="badge badge-${o.status}">${o.status === 'confirmed' ? t('Payment Confirmed') : t(o.status)}</span></p>
@@ -661,7 +675,7 @@ function viewOrder(id) {
         `;
         document.getElementById('orderDetailContent').innerHTML = html;
         document.getElementById('orderDetailModal').classList.add('active');
-    });
+    }).catch(() => { /* fetchJson has toasted; there is no order to show */ });
 }
 function closeOrderDetail() { document.getElementById('orderDetailModal').classList.remove('active'); }
 
