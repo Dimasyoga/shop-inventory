@@ -2,13 +2,14 @@
 
 ## 1. Repository Summary
 
-A Flask-based shop inventory management system built with Python 3.14, SQLite, and Chart.js. It provides a complete solution for managing products, orders, stock, and sales analytics for small retail businesses.
+A Flask-based shop inventory management system built with Python 3.13, SQLite, and Chart.js. It provides a complete solution for managing products, orders, stock, and sales analytics for small retail businesses.
 
 ### Tech Stack
-- **Backend**: Python 3.14 + Flask 3.1.3
+- **Backend**: Python 3.13 + Flask 3.1.3
 - **Database**: SQLite (file: `shop.db`)
 - **Frontend**: Jinja2 templates + vanilla JavaScript
-- **Charts**: Chart.js 4.4.7 (CDN)
+- **Charts**: Chart.js 4.4.7, vendored in `static/js/vendor/` (no CDN — the shop
+  network may be offline)
 - **Currency**: Indonesian Rupiah (Rp)
 
 ### Features
@@ -117,7 +118,9 @@ shop-inventory/
 ├── static/
 │   ├── css/style.css   # Application styles
 │   ├── fonts/          # Vendored DejaVu TTFs for PDF rendering
-│   └── js/app.js       # Client-side JavaScript
+│   └── js/
+│       ├── app.js      # Client-side JavaScript
+│       └── vendor/     # Vendored Chart.js (never a CDN — shop may be offline)
 └── templates/
     ├── base.html       # Base layout with sidebar navigation
     ├── login.html      # Login page
@@ -499,13 +502,9 @@ who asked for it or how.
 ```
 Draft ──[Confirm Payment]──> Confirmed ──[Complete/Deliver]──> Completed
   │                              │
-  └────[Cancel]─────────────────> Deleted
-                                  │
-                                  └─> (No stock impact)
-
-Confirmed ──[Cancel]──────────> Deleted
-                                │
-                                └─> (No stock impact)
+  │                              └──[Cancel]──> Cancelled  (no stock impact)
+  │                                                 ▲
+  └────[Cancel]─────────────────────────────────────┘
 
 Completed ──[Cannot Cancel]──> (Final state)
 ```
