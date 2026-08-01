@@ -286,6 +286,7 @@ TRANSLATIONS = {
         'A PDF with the month summary plus every sale, restock and self-use record, for audit. Saved on the server and sendable to your whitelisted Telegram IDs.':
             'PDF berisi ringkasan bulan beserta seluruh catatan penjualan, restok, dan pemakaian sendiri, untuk audit. Tersimpan di server dan dapat dikirim ke ID Telegram yang diizinkan.',
         'Download PDF': 'Unduh PDF',
+        'Download CSV': 'Unduh CSV',
         'Send to Telegram': 'Kirim ke Telegram',
         'Sending…': 'Mengirim…',
         'Report for {month} sent to {n} recipient(s)':

@@ -606,6 +606,13 @@ By hand, for any month:
 1. Go to **Sales → Monthly Report**, pick a month
 2. **Download PDF** streams it to your browser; **Send to Telegram** pushes it to
    the whitelist. Either way the archive copy is written
+3. **Download CSV** gives the same month as one row per product sold — order number,
+   date, product, SKU, quantity, unit price, unit cost, subtotal and profit — for a
+   spreadsheet or a tax return. Amounts are plain numbers, not `Rp 25.000`, so they
+   can be summed. **A blank cost or profit means the cost was never recorded**, not
+   that the item was free; those are the same sales the Gross Profit figure says it
+   had to leave out. Opens correctly in Excel and LibreOffice, including product
+   names with accents or curly quotes
 3. Or in the bot: **📄 Monthly report**, then pick one of the last six months
 
 Every path calls the same `reports.build()`, so a report is identical no matter

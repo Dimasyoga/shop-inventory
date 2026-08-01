@@ -7,6 +7,8 @@ page 1 can be reconciled against the underlying rows.
 Like services.py this module takes an open sqlite3 connection and must not import
 app.py -- both the web routes and the Telegram bot render reports.
 """
+import csv
+import io
 import logging
 import os
 from datetime import datetime, timezone
@@ -36,8 +38,8 @@ def period_key(dt):
     return f'{dt.year:04d}-{dt.month:02d}'
 
 
-def report_filename(period):
-    return f'shop-report-{period}.pdf'
+def report_filename(period, ext='pdf'):
+    return f'shop-report-{period}.{ext}'
 
 
 def month_offset(period, tz, now=None):
@@ -83,15 +85,17 @@ def completed_orders(db, start, end):
     date_filter, params = build_date_filter(start, end, 'o.created_at')
     rows = db.execute("""
         SELECT o.id, o.created_at, o.total_amount,
-               oi.quantity, oi.unit_price, oi.subtotal,
+               oi.quantity, oi.unit_price, oi.unit_cost, oi.subtotal,
                p.name AS product_name, p.sku AS product_sku
         FROM orders o
         LEFT JOIN order_items oi ON oi.order_id = o.id
         LEFT JOIN products p ON p.id = oi.product_id
         WHERE o.status = 'completed'
     """ + date_filter + " ORDER BY o.created_at, o.id, oi.id", params).fetchall()
+    # unit_cost rides along for the CSV export; the PDF builds its rows from the
+    # keys it names, so carrying one more costs it nothing.
     return _group(rows, ('id', 'created_at', 'total_amount'),
-                  ('quantity', 'unit_price', 'subtotal'))
+                  ('quantity', 'unit_price', 'unit_cost', 'subtotal'))
 
 
 def restock_batches(db, start, end):
@@ -159,6 +163,58 @@ def collect(db, offset, tz, lang, now=None):
         'restocks': restock_batches(db, start, end),
         'self_uses': self_use_batches(db, start, end),
     }
+
+
+# --- CSV export ---
+
+def _num(value):
+    """A number a spreadsheet can sum.
+
+    Rupiah amounts are whole in practice and SQLite hands them back as REAL, so a
+    column of '25000.0' would be noise; anything with a genuine fraction keeps it.
+    """
+    if value is None:
+        return ''
+    return str(int(value)) if float(value).is_integer() else f'{float(value):.2f}'
+
+
+def sales_csv(db, offset, tz, lang, now=None):
+    """Every sold line of a month, as CSV text.
+
+    A sibling of the PDF rather than a replacement: the report is a document to file
+    away, this is the same month in a shape a spreadsheet or a tax return can take.
+    What counts follows the same rule -- completed orders only, so drafts, confirmed
+    but unpaid, and cancelled orders never appear.
+
+    Deliberately not built on collect(): that also computes the summary, the top
+    sellers and the unsold list, none of which belongs in a row-per-line export.
+    """
+    t = i18n.make_t(lang)
+    start, end = get_date_range('month', offset, tz, now=now)
+    out = io.StringIO()
+    writer = csv.writer(out)
+    writer.writerow([t('Order'), t('Date'), t('Product'), t('SKU'), t('Qty'),
+                     t('Unit Price'), t('Unit Cost'), t('Subtotal'), t('Profit')])
+    for order in completed_orders(db, start, end):
+        for item in order['items']:
+            # A cost of 0 means "never recorded" everywhere in this app, and a
+            # spreadsheet cannot tell that from stock that genuinely cost nothing.
+            # Blank says unknown, and the profit that would have been derived from it
+            # stays blank too rather than reading as pure margin.
+            costed = item['unit_cost'] > 0
+            profit = item['subtotal'] - item['unit_cost'] * item['quantity']
+            writer.writerow([
+                order['id'],
+                _local(order['created_at'], tz),
+                item['product_name'] or '',
+                item['product_sku'] or '',
+                item['quantity'],
+                _num(item['unit_price']),
+                _num(item['unit_cost']) if costed else '',
+                _num(item['subtotal']),
+                _num(profit) if costed else '',
+            ])
+    return out.getvalue()
 
 
 # --- Rendering ---

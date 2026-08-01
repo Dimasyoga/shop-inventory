@@ -1085,6 +1085,26 @@ def api_report_download():
         'Content-Disposition':
             f'attachment; filename="{reports.report_filename(data["period"])}"'})
 
+@app.route('/api/reports/monthly.csv', methods=['GET'])
+@login_required
+def api_report_csv():
+    """The month's sold lines as CSV, for a spreadsheet or a tax return.
+
+    Same month selector and same window as the PDF, deliberately: two exports of one
+    month that disagreed about where the month starts would be worse than one.
+    """
+    offset, err = _report_offset()
+    if err:
+        return err
+    text = reports.sales_csv(g.db, offset, _shop_tz(), get_lang())
+    period = reports.period_key(services.get_date_range('month', offset, _shop_tz())[0])
+    # utf-8-sig, not plain utf-8: Excel reads a BOM-less CSV as the local codepage and
+    # mangles any product name with a curly quote or a non-ASCII letter in it. Product
+    # names are user data -- the same reason the PDF fonts are vendored Unicode ones.
+    return Response(text.encode('utf-8-sig'), mimetype='text/csv; charset=utf-8', headers={
+        'Content-Disposition':
+            f'attachment; filename="{reports.report_filename(period, "csv")}"'})
+
 @app.route('/api/reports/monthly/send', methods=['POST'])
 @login_required
 def api_report_send():

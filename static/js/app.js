@@ -714,6 +714,11 @@ function downloadReport() {
     window.location = `/api/reports/monthly?offset=${reportOffset()}`;
 }
 
+function downloadCsv() {
+    /* Same month selector as the PDF, same navigation trick. */
+    window.location = `/api/reports/monthly.csv?offset=${reportOffset()}`;
+}
+
 function sendReport() {
     const btn = document.getElementById('reportSendBtn');
     const label = btn.textContent;
