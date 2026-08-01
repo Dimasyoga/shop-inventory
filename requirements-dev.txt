@@ -4,3 +4,9 @@ pytest==9.1.1
 # unpinned one turns "someone else released a version" into a red build on a branch
 # that changed nothing. Configured in ruff.toml.
 ruff==0.16.1
+# Browser tests (tests/browser). Needs a one-off `playwright install chromium` to
+# fetch the browser itself -- the wheel does not carry it, and CI has its own step.
+# Without the package those tests are skipped by collect_ignore_glob rather than
+# failing, so the rest of the suite still runs.
+pytest-playwright==0.8.0
+playwright==1.62.0

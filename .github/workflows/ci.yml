@@ -16,6 +16,10 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-dev.txt
       - run: pip install -r requirements-dev.txt
+      # The browser suite in tests/browser needs a real Chromium; the wheel does not
+      # ship one. --with-deps pulls the system libraries the headless shell links
+      # against, which the runner does not have by default.
+      - run: playwright install --with-deps chromium
       - run: python -m pytest -q
 
   lint:

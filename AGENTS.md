@@ -23,6 +23,7 @@ bilingual (English / Bahasa Indonesia).
 | `templates/*.html` | Jinja templates; `settings.html` holds Telegram/language/account config. |
 | `static/js/app.js` | Client JS; `t(...)` mirrors the server translator. |
 | `tests/` | pytest. `conftest.py` has `db_path` (temp DB), `client`, `insert` fixtures. |
+| `tests/browser/` | Playwright against a real server. `conftest.py` has `live_server`, `shop` (seeding + stock assertions) and a signed-in `page`. |
 
 ## Key conventions (follow these)
 
@@ -85,6 +86,26 @@ bilingual (English / Bahasa Indonesia).
   `created_at DESC`, which would buy a sort and a wider index for nothing. The
   unfiltered history has no index at all on purpose: descending rowid walks the table
   backwards and stops at the page size.
+- **`api()` in `app.js` rejects on any non-2xx, so every caller needs a `.catch`.**
+  Write `api(...).then(d => ...).catch(err => showToast(err.message, 'error'))`.
+  `.then(d => d.success ? ... : showToast(d.error))` is the trap: `api()` throws rather
+  than resolving with the error body, so that failure branch is unreachable and the
+  rejection goes nowhere. Eight write paths were written that way and silently swallowed
+  every refusal the server made — a rejected order edit left the modal sitting open with
+  no explanation. `tests/browser/test_error_reporting_ui.py` pins the behaviour; the
+  server-side tests cannot see it, because the API was returning a correct 400 the whole
+  time. Anything rendering into the page rather than acting on the result should use
+  `fetchJson`, which toasts on failure by itself.
+- **UI behaviour is tested in `tests/browser/`, in a real browser.** `static/js/app.js`
+  is a thousand lines that no Flask test client can reach: paging, modal state and
+  downloads are all client-side, and three features once shipped with a green suite and
+  had to be clicked by hand before anyone knew they worked. The server there is a
+  **subprocess**, because `tests/conftest.py` monkeypatches `database.DB_PATH` and a
+  threaded server would share that global. Sign-in mints a session cookie rather than
+  driving the login form — it keeps the suite off the login throttle, which buckets by
+  address and would lock out after five tests. Reach for these whenever a change lands
+  in `app.js` or a template; assert on what the reservation columns did afterwards
+  (`shop.stock_of`), not just on what the page says.
 - **Migrations** live in `init_db()` and must be idempotent (guard with
   `PRAGMA table_info` / `sqlite_master` checks). New columns go both in the
   `CREATE TABLE` block *and* a guarded `ALTER TABLE` for existing DBs. *Removing* a
@@ -165,7 +186,9 @@ bilingual (English / Bahasa Indonesia).
 bash start.sh            # or: python3 app.py  (serves http://localhost:5000)
 ruff check .             # config in ruff.toml; CI fails on a finding
 ./backup.sh              # backups/shop-<stamp>.db; ./restore.sh <file> puts one back
-source venv/bin/activate && python -m pytest -q   # full suite
+source venv/bin/activate && python -m pytest -q   # full suite, browser tests included
+playwright install chromium    # one-off, before the browser tests can run
+python -m pytest -q -m "not browser"   # skip them if you have not
 docker compose up -d --build   # deployment path; ./deploy.sh to update
 ```
 

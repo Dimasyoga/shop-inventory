@@ -45,6 +45,11 @@ function escapeHtml(s) {
     }[c]));
 }
 
+/* Resolves only on a 2xx; anything else **throws** with the server's translated error
+   text. So every caller needs a .catch to say so -- `.then(d => d.success ? ... : ...)`
+   is a trap, because the failure branch is unreachable and the rejection goes nowhere.
+   Eight call sites were written that way and swallowed every refusal the server made,
+   which is what tests/browser exists to catch. */
 async function api(url, method = 'GET', body = null) {
     const opts = { method, headers: { 'Content-Type': 'application/json' } };
     if (body) opts.body = JSON.stringify(body);
@@ -333,23 +338,19 @@ function saveProduct(e) {
     }
     const method = id ? 'PUT' : 'POST';
     const url = id ? '/api/products/' + id : '/api/products';
-    api(url, method, data).then(d => {
-        if (d.success) {
-            showToast(t('Product saved'));
-            closeProductModal();
-            loadProducts();
-        } else showToast(d.error, 'error');
-    });
+    api(url, method, data).then(() => {
+        showToast(t('Product saved'));
+        closeProductModal();
+        loadProducts();
+    }).catch(err => showToast(err.message, 'error'));
 }
 
 function deleteProduct(id) {
     if (!confirm(t('Archive this product?'))) return;
-    api('/api/products/' + id, 'DELETE').then(d => {
-        if (d.success) {
-            showToast(t('Product archived'));
-            loadProducts();
-        } else showToast(d.error, 'error');
-    });
+    api('/api/products/' + id, 'DELETE').then(() => {
+        showToast(t('Product archived'));
+        loadProducts();
+    }).catch(err => showToast(err.message, 'error'));
 }
 
 /* ===== Orders ===== */
@@ -605,43 +606,35 @@ function saveOrder() {
         ? api('/api/orders/' + editingOrderId, 'PUT', { items })
         : api('/api/orders', 'POST', { items });
     request.then(d => {
-        if (d.success) {
-            showToast(editing ? t('Order ID {id} updated', { id: d.order_id })
-                              : t('Order ID {id} created', { id: d.order_id }));
-            closeOrderModal();
-            loadOrders();
-        } else showToast(d.error, 'error');
-    });
+        showToast(editing ? t('Order ID {id} updated', { id: d.order_id })
+                          : t('Order ID {id} created', { id: d.order_id }));
+        closeOrderModal();
+        loadOrders();
+    }).catch(err => showToast(err.message, 'error'));
 }
 
 function confirmOrder(id) {
     if (!confirm(t('Confirm payment for this order?'))) return;
-    api('/api/orders/' + id + '/confirm', 'POST').then(d => {
-        if (d.success) {
-            showToast(t('Payment confirmed'));
-            loadOrders();
-        } else showToast(d.error, 'error');
-    });
+    api('/api/orders/' + id + '/confirm', 'POST').then(() => {
+        showToast(t('Payment confirmed'));
+        loadOrders();
+    }).catch(err => showToast(err.message, 'error'));
 }
 
 function completeOrder(id) {
     if (!confirm(t('Complete this order? Stock will be deducted.'))) return;
-    api('/api/orders/' + id + '/complete', 'POST').then(d => {
-        if (d.success) {
-            showToast(t('Order completed'));
-            loadOrders();
-        } else showToast(d.error, 'error');
-    });
+    api('/api/orders/' + id + '/complete', 'POST').then(() => {
+        showToast(t('Order completed'));
+        loadOrders();
+    }).catch(err => showToast(err.message, 'error'));
 }
 
 function cancelOrder(id) {
     if (!confirm(t('Cancel this order?'))) return;
-    api('/api/orders/' + id + '/cancel', 'POST').then(d => {
-        if (d.success) {
-            showToast(t('Order cancelled'));
-            loadOrders();
-        } else showToast(d.error, 'error');
-    });
+    api('/api/orders/' + id + '/cancel', 'POST').then(() => {
+        showToast(t('Order cancelled'));
+        loadOrders();
+    }).catch(err => showToast(err.message, 'error'));
 }
 
 function viewOrder(id) {
@@ -972,15 +965,13 @@ function submitRestock() {
     const form = readRestockForm();
     if (!form.items.length) return showToast(t('Add at least one product'), 'error');
     api('/api/restock', 'POST', form).then(d => {
-        if (d.success) {
-            showToast(t('Restock saved! Total cost: {cost}', { cost: formatRupiah(d.total_cost) }));
-            document.getElementById('restockItems').innerHTML = '';
-            ['restockDiscountInput', 'restockShippingInput', 'restockAdminFeeInput']
-                .forEach(id => document.getElementById(id).value = '0');
-            addRestockItem();
-            loadRestockHistory();
-        } else showToast(d.error, 'error');
-    });
+        showToast(t('Restock saved! Total cost: {cost}', { cost: formatRupiah(d.total_cost) }));
+        document.getElementById('restockItems').innerHTML = '';
+        ['restockDiscountInput', 'restockShippingInput', 'restockAdminFeeInput']
+            .forEach(id => document.getElementById(id).value = '0');
+        addRestockItem();
+        loadRestockHistory();
+    }).catch(err => showToast(err.message, 'error'));
 }
 
 /* A batch reads three ways in the history: ordinary and voidable, the void itself, or
@@ -1119,14 +1110,12 @@ function submitSelfUse() {
     });
     if (!items.length) return showToast(t('Add at least one product'), 'error');
     api('/api/self-use', 'POST', { items }).then(d => {
-        if (d.success) {
-            showToast(t('Self use saved! Total value: {value}', { value: formatRupiah(d.total_value) }));
-            document.getElementById('selfUseItems').innerHTML = '';
-            addSelfUseItem();
-            calcSelfUseTotal();
-            loadSelfUseHistory();
-        } else showToast(d.error, 'error');
-    });
+        showToast(t('Self use saved! Total value: {value}', { value: formatRupiah(d.total_value) }));
+        document.getElementById('selfUseItems').innerHTML = '';
+        addSelfUseItem();
+        calcSelfUseTotal();
+        loadSelfUseHistory();
+    }).catch(err => showToast(err.message, 'error'));
 }
 
 function loadSelfUseHistory() {

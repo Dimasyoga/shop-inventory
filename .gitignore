@@ -9,3 +9,5 @@ reports/
 *.pyc
 venv/
 __pycache__
+# pytest-playwright drops traces and screenshots here on a failure.
+test-results/
