@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}{{ t('Stock History') }}{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h2>{{ t('Stock History') }}</h2>
+</div>
+
+<div class="card">
+    <p class="help-text">
+        {{ t('Every recorded change to physical stock: sales, restocks, self use, voids and manual adjustments. Stock held by an open order is not a movement and does not appear here until the order is completed.') }}
+    </p>
+    <div class="table-controls">
+        <select id="filterMovementProduct" onchange="reloadMovementsFromStart()">
+            <option value="">{{ t('All products') }}</option>
+            {% for p in products %}
+            <option value="{{ p.id }}">{{ p.name }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>{{ t('Date') }}</th><th>{{ t('Product') }}</th><th>{{ t('Change') }}</th>
+                <th>{{ t('Reason') }}</th><th>{{ t('By') }}</th>
+            </tr>
+        </thead>
+        <tbody id="movementsBody"></tbody>
+    </table>
+    <div class="pager" id="movementsPager"></div>
+</div>
+{% endblock %}

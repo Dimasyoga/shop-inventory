@@ -481,9 +481,11 @@ def init_db():
     #
     # SQLite indexes primary keys and UNIQUE columns on its own, but not foreign keys,
     # so joining a batch or an order to its lines was a full table scan of every line
-    # the shop had ever written. Deliberately absent: stock_logs, which the app writes
-    # and never reads back -- an index there would cost every restock and sale a write
-    # to serve no query.
+    # the shop had ever written.
+    #
+    # stock_logs was deliberately absent here for as long as nothing read it back. The
+    # stock history page reads it now, and one index earns its keep: see the note on
+    # idx_stock_logs_product below for why it is one and not two.
     c.executescript('''
         -- Order lines by their order: order detail, the orders list, and the join
         -- behind every sales figure and the monthly report.
@@ -510,6 +512,15 @@ def init_db():
         -- The active catalogue in name order: the products page, the order form and
         -- every product picker in the bot.
         CREATE INDEX IF NOT EXISTS idx_products_active_name ON products(is_archived, name);
+        -- One product's stock movements, newest first. The only index on the table the
+        -- app writes to most, so it is deliberately the narrowest one that works: an
+        -- index entry carries the rowid, and stock_logs.id *is* the rowid, so
+        -- (product_id) alone already orders each product's rows by id and the history
+        -- page's ORDER BY id DESC needs no sort. Adding created_at would widen every
+        -- sale, restock and self-use write to buy a column the plan never consults.
+        -- The unfiltered history gets no index at all and wants none: descending rowid
+        -- walks the table backwards and stops at the page size.
+        CREATE INDEX IF NOT EXISTS idx_stock_logs_product ON stock_logs(product_id);
     ''')
 
     conn.commit()

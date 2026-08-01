@@ -350,6 +350,22 @@ TRANSLATIONS = {
         'Corrected held stock for {n} product(s)':
             'Stok tertahan diperbaiki untuk {n} produk',
 
+        # --- Stock history ---
+        'Stock History': 'Riwayat Stok',
+        'Every recorded change to physical stock: sales, restocks, self use, voids and '
+        'manual adjustments. Stock held by an open order is not a movement and does not '
+        'appear here until the order is completed.':
+            'Setiap perubahan stok fisik yang tercatat: penjualan, restok, pemakaian '
+            'sendiri, pembatalan dan penyesuaian manual. Stok yang ditahan pesanan '
+            'terbuka bukan pergerakan dan baru muncul di sini setelah pesanan selesai.',
+        'All products': 'Semua produk',
+        'Change': 'Perubahan',
+        'Reason': 'Alasan',
+        'By': 'Oleh',
+        'No stock movements recorded': 'Belum ada pergerakan stok tercatat',
+        'unknown': 'tidak diketahui',
+        'Invalid product': 'Produk tidak valid',
+
         # --- Telegram bot screens ---
         'What do you want to do?': 'Apa yang ingin Anda lakukan?',
         '📦 Products': '📦 Produk',

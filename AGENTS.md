@@ -54,8 +54,11 @@ bilingual (English / Bahasa Indonesia).
   keyword-only `actor=ACTOR_SYSTEM`; the default is deliberately honest rather than
   convenient, because crediting an unattributed call to the admin would make the
   column worse than useless the one time somebody reads it. Rows from before the
-  column stay `NULL` and are **not** backfilled. This is forensic, read by SQL and
-  nothing else — which is why `stock_logs` is still deliberately unindexed.
+  column stay `NULL` and are **not** backfilled, so the history shows those as unknown
+  rather than inventing an actor. The Stock History page (`/stock-history`,
+  `services.list_stock_movements`) is what reads the table back. `reason` is stored
+  English written at the time of the movement and is displayed **as recorded, never
+  translated** — it is a record of what happened, and it is not a `t(...)` call site.
 - **Lists are paged, and a page costs a fixed number of queries.** `list_orders`
   returns `(orders, has_more)` where each order is a dict already carrying its `items`,
   fetched for the whole page in one `IN` query — never one per row. `GET /api/orders`
@@ -74,8 +77,14 @@ bilingual (English / Bahasa Indonesia).
   on `EXPLAIN QUERY PLAN`, not on timings: the shop's own database is small enough that
   a scan is invisible, so an index the planner declines to use would cost writes and buy
   nothing with no test noticing. Adding one means adding the plan assertion that
-  justifies it. `stock_logs` is deliberately left unindexed — every sale, restock and
-  self use writes to it and nothing reads it back.
+  justifies it. `stock_logs` carries exactly one index, `(product_id)`, and that is a
+  ceiling rather than a starting point: it is the table every sale, restock and self use
+  writes to. It stays that narrow because an index entry carries the rowid and
+  `stock_logs.id` *is* the rowid, so `(product_id)` alone already orders a product's
+  movements the way the history page reads them — `ORDER BY id DESC`, never
+  `created_at DESC`, which would buy a sort and a wider index for nothing. The
+  unfiltered history has no index at all on purpose: descending rowid walks the table
+  backwards and stops at the page size.
 - **Migrations** live in `init_db()` and must be idempotent (guard with
   `PRAGMA table_info` / `sqlite_master` checks). New columns go both in the
   `CREATE TABLE` block *and* a guarded `ALTER TABLE` for existing DBs. *Removing* a
@@ -122,7 +131,13 @@ bilingual (English / Bahasa Indonesia).
   are *not* checked against reservations — they record something that already physically
   happened, so refusing them would only make the database wrong. A hold is a claim on
   stock, not a lock on the shelf, and `complete_order` keeps its `stock_qty` guard for
-  exactly that case.
+  exactly that case. Because `reserved_qty` is a counter and the open order lines are
+  what justify it, `services.reservation_drift` recomputes and compares the two;
+  `repair_reservations` resets the counter and returns the *before* state so the caller
+  can report what changed. Startup logs drift and never repairs it, and the two are
+  separate actions in Settings on purpose — the figure says what customers were
+  promised, so it gets shown before anything rewrites it. Resist making repair
+  automatic for the same reason `cost_review_needed` does not clear itself.
 - **The login throttle buckets by client address, not username.** Five failures in
   15 minutes lock the bucket (`app._login_failures`), and a lockout refuses the
   *correct* password too — checking credentials first would make the throttle an

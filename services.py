@@ -440,6 +440,36 @@ def repair_reservations(db):
     return drifted
 
 
+# --- Stock movement history ---
+
+def list_stock_movements(db, product_id=None, page=0, page_size=25):
+    """Recorded stock movements, newest first. Returns (rows, has_more).
+
+    Ordered by id alone rather than the ``created_at DESC, id DESC`` the orders list
+    uses. stock_logs is append-only and id is the rowid, so id order *is* chronological
+    here and is a total order by construction -- there is no tie for created_at's
+    second resolution to leave unbroken. It is also what makes this cheap: descending
+    rowid is a reverse walk of the table itself, and the product filter rides
+    idx_stock_logs_product, whose entries carry the rowid. Neither plan sorts.
+
+    ``reason`` is stored English written at the time of the movement (``sale order #12``,
+    or whatever a human typed into a stock adjustment) and is shown as recorded, not
+    translated: it is a record of what happened, and rewriting records to suit the
+    reader's language is not what an audit trail is for.
+    """
+    query = ("SELECT s.id, s.product_id, s.change_qty, s.reason, s.actor, s.created_at,"
+             " p.name AS product_name, p.sku AS product_sku"
+             " FROM stock_logs s JOIN products p ON p.id = s.product_id")
+    params = []
+    if product_id:
+        query += " WHERE s.product_id = ?"
+        params.append(product_id)
+    query += " ORDER BY s.id DESC LIMIT ? OFFSET ?"
+    params += [page_size + 1, page * page_size]
+    rows = db.execute(query, params).fetchall()
+    return [dict(r) for r in rows[:page_size]], len(rows) > page_size
+
+
 # --- Restock ---
 
 def allocate_restock_costs(items, discount=0, shipping_cost=0, admin_fee=0):

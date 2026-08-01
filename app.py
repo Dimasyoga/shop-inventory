@@ -476,6 +476,39 @@ def api_stock_adjust():
     g.db.commit()
     return jsonify({'success': True, 'new_qty': new_qty})
 
+# --- Stock movement history ---
+MOVEMENTS_PAGE_SIZE = 25
+
+@app.route('/stock-history')
+@login_required
+def stock_history_page():
+    # Archived products included, unlike the order form: a product is usually archived
+    # *after* its last movement, and a history that hid those rows would lose exactly
+    # the stock it is most useful for accounting for.
+    products = g.db.execute("SELECT id, name FROM products ORDER BY name").fetchall()
+    return render_template('stock_history.html', products=products)
+
+@app.route('/api/stock/movements', methods=['GET'])
+@login_required
+def api_stock_movements():
+    """Every recorded change to physical stock, newest first.
+
+    Reservations are absent by design and not an oversight: holding stock for an open
+    order moves reserved_qty and nothing else, so there is no movement to show until
+    the order completes. Settings > Data integrity is where held stock is checked.
+    """
+    page = _int_arg('page')
+    if page is None or page < 0:
+        return _err('Invalid page')
+    product_id = None
+    if request.args.get('product_id'):
+        product_id = _int_arg('product_id')
+        if product_id is None or product_id < 1:
+            return _err('Invalid product')
+    movements, has_more = services.list_stock_movements(
+        g.db, product_id=product_id, page=page, page_size=MOVEMENTS_PAGE_SIZE)
+    return jsonify({'movements': movements, 'has_more': has_more, 'page': page})
+
 # --- Orders ---
 @app.route('/orders')
 @login_required

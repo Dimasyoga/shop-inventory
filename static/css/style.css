@@ -102,6 +102,11 @@ select { padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-siz
 .pager button[disabled] { opacity: .45; cursor: default; }
 .pager-label { color: #666; font-size: 14px; }
 
+/* Stock in and out on the history page. Colour is a second cue, not the only one --
+   the sign is always printed, so a red/green blind reader loses nothing. */
+.qty-in { color: #1e8449; font-weight: 600; white-space: nowrap; }
+.qty-out { color: #b03a2e; font-weight: 600; white-space: nowrap; }
+
 /* A voided batch and the void reversing it both still count as history -- muted rather
    than hidden, because the audit trail is the point of keeping them. */
 .batch-void { color: #999; font-style: italic; }

@@ -152,7 +152,7 @@ function renderReservationDrift(drift) {
     </tr>`).join('');
     box.innerHTML = `
         <p class="help-text">⚠️ ${escapeHtml(t('{n} product(s) hold stock that open orders do not account for.', { n: drift.length }))}</p>
-        <table>
+        <table class="data-table">
             <thead><tr>
                 <th>${t('Product')}</th><th>${t('Held now')}</th>
                 <th>${t('Orders justify')}</th><th>${t('Difference')}</th>
@@ -422,6 +422,58 @@ function renderOrdersPager(hasMore, shown) {
                 ${ordersPage === 0 ? 'disabled' : ''}>${t('◀ Prev')}</button>
         <span class="pager-label">${t('Page {n}', { n: ordersPage + 1 })}</span>
         <button class="btn btn-secondary" onclick="goToOrdersPage(1)"
+                ${hasMore ? '' : 'disabled'}>${t('Next ▶')}</button>
+    `;
+}
+
+/* ===== Stock history ===== */
+let movementsPage = 0;
+
+function reloadMovementsFromStart() {
+    movementsPage = 0;
+    loadMovements();
+}
+
+function goToMovementsPage(delta) {
+    movementsPage = Math.max(0, movementsPage + delta);
+    loadMovements();
+}
+
+function loadMovements() {
+    const productId = document.getElementById('filterMovementProduct').value;
+    let url = '/api/stock/movements?page=' + movementsPage;
+    if (productId) url += '&product_id=' + encodeURIComponent(productId);
+    fetchJson(url).then(data => {
+        const rows = data.movements || [];
+        const tbody = document.getElementById('movementsBody');
+        renderMovementsPager(data.has_more);
+        if (!rows.length) {
+            if (movementsPage > 0) return goToMovementsPage(-1);
+            tbody.innerHTML = `<tr><td colspan="5" class="empty-row">${t('No stock movements recorded')}</td></tr>`;
+            return;
+        }
+        tbody.innerHTML = rows.map(m => `
+            <tr>
+                <td>${formatLocalDate(m.created_at)}</td>
+                <td>${escapeHtml(m.product_name)}${m.product_sku ? ` <span class="stock-held">${escapeHtml(m.product_sku)}</span>` : ''}</td>
+                <td class="${m.change_qty < 0 ? 'qty-out' : 'qty-in'}">${m.change_qty > 0 ? '+' : ''}${m.change_qty}</td>
+                <td>${escapeHtml(m.reason || '')}</td>
+                <td>${escapeHtml(m.actor || t('unknown'))}</td>
+            </tr>`).join('');
+    }).catch(() => {});
+}
+
+function renderMovementsPager(hasMore) {
+    const pager = document.getElementById('movementsPager');
+    if (!hasMore && movementsPage === 0) {
+        pager.innerHTML = '';
+        return;
+    }
+    pager.innerHTML = `
+        <button class="btn btn-secondary" onclick="goToMovementsPage(-1)"
+                ${movementsPage === 0 ? 'disabled' : ''}>${t('◀ Prev')}</button>
+        <span class="pager-label">${t('Page {n}', { n: movementsPage + 1 })}</span>
+        <button class="btn btn-secondary" onclick="goToMovementsPage(1)"
                 ${hasMore ? '' : 'disabled'}>${t('Next ▶')}</button>
     `;
 }
@@ -1118,6 +1170,7 @@ document.addEventListener('DOMContentLoaded', () => {
         loadProducts();
     }
     if (document.getElementById('ordersBody')) loadOrders();
+    if (document.getElementById('movementsBody')) loadMovements();
     if (document.getElementById('trendChart')) loadSalesData();
     if (document.getElementById('reportMonth')) loadReportMonths();
     if (document.getElementById('restockItems')) {

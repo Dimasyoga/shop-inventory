@@ -21,6 +21,7 @@ EXPECTED = {
     'idx_restock_batches_voids',
     'idx_self_use_batches_voids',
     'idx_products_active_name',
+    'idx_stock_logs_product',
 }
 
 
@@ -111,10 +112,34 @@ def test_the_active_catalogue_comes_back_in_name_order(db_path):
     assert 'TEMP B-TREE' not in p
 
 
-def test_stock_logs_is_deliberately_unindexed(db_path):
-    """It is written by every sale, restock and self use, and read by nothing.
+HISTORY = ("SELECT s.*, p.name FROM stock_logs s JOIN products p ON p.id = s.product_id"
+           " {where} ORDER BY s.id DESC LIMIT 26 OFFSET 0")
 
-    If a feature ever reads it back, this test should fail and be replaced by an
-    index -- until then the writes should not be paying for one.
+
+def test_one_products_stock_history_is_a_seek_and_needs_no_sort(db_path):
+    """stock_logs was unindexed for as long as nothing read it; the history page does.
+
+    Both halves matter. The index turns the filter from a scan of every movement the
+    shop has ever recorded into a seek, and the ORDER BY comes out free: an index entry
+    carries the rowid, and stock_logs.id *is* the rowid, so the index already orders
+    each product's rows the way the page wants them.
     """
-    assert not [i for i in indexes(db_path) if 'stock_log' in i]
+    p = plan(db_path, HISTORY.format(where="WHERE s.product_id = 1"))
+    assert 'idx_stock_logs_product' in p
+    assert 'TEMP B-TREE' not in p
+
+
+def test_the_unfiltered_history_sorts_nothing_and_wants_no_index(db_path):
+    """Descending rowid walks the table backwards and stops at the page size, so the
+    all-products view needs no index of its own. A second one on created_at would widen
+    every sale, restock and self-use write to serve a plan that already does not sort.
+    """
+    p = plan(db_path, HISTORY.format(where=""))
+    assert 'TEMP B-TREE' not in p
+
+
+def test_stock_logs_has_exactly_one_index(db_path):
+    """The table the app writes to most. One index is justified above; a second needs
+    its own plan assertion here, or it is costing every movement a write for nothing.
+    """
+    assert [i for i in indexes(db_path) if 'stock_log' in i] == ['idx_stock_logs_product']
