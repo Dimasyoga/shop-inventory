@@ -137,6 +137,7 @@ def init_db():
             stock_qty INTEGER NOT NULL DEFAULT 0,
             reorder_threshold INTEGER NOT NULL DEFAULT 0,
             is_archived INTEGER NOT NULL DEFAULT 0,
+            cost_review_needed INTEGER NOT NULL DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
@@ -363,6 +364,15 @@ def init_db():
         backfilled = c.execute("SELECT COUNT(*) FROM order_items WHERE unit_cost > 0").fetchone()[0]
         log.warning('backfilled unit_cost on %d historical order line(s) from the seeded product '
                     'cost; margins from before this upgrade are estimates', backfilled)
+
+    # Migrate: mark products whose recorded cost is suspect rather than merely absent.
+    # A cost of 0 already means "unknown" and is visible as such, but a cost that a
+    # voided restock left standing looks perfectly ordinary while being wrong. The flag
+    # is what tells the two apart on the products page; nothing sets it until a void
+    # cannot restore the previous cost.
+    product_cols = [r[1] for r in c.execute("PRAGMA table_info(products)").fetchall()]
+    if 'cost_review_needed' not in product_cols:
+        c.execute("ALTER TABLE products ADD COLUMN cost_review_needed INTEGER NOT NULL DEFAULT 0")
 
     # Seed the first user. Credentials come from the environment so a deployment
     # never has to ship with the documented default; changing them later has no

@@ -99,7 +99,8 @@ def test_category_id_column_is_gone(legacy_db):
     cols = {r["name"] for r in query(legacy_db, "PRAGMA table_info(products)")}
     assert "category_id" not in cols
     assert cols == {"id", "name", "sku", "price", "cost_price", "stock_qty",
-                    "reorder_threshold", "is_archived", "created_at", "updated_at"}
+                    "reorder_threshold", "is_archived", "cost_review_needed",
+                    "created_at", "updated_at"}
 
 
 def test_the_rebuild_leaves_no_scratch_table_behind(legacy_db):

@@ -127,14 +127,39 @@ function saveAccount(e) {
 }
 
 /* ===== Products ===== */
+// The chip is a filter, not a search term, so it lives outside the search box and
+// survives typing in it. Deep-linkable as /products?needs_cost=1 so the uncosted-sales
+// notes on the dashboard and sales page can point straight at the work.
+let needsCostOnly = false;
+
+function toggleNeedsCost() {
+    needsCostOnly = !needsCostOnly;
+    document.getElementById('needsCostChip').classList.toggle('active', needsCostOnly);
+    loadProducts();
+}
+
+// Two different problems, and conflating them would hide the worse one: no cost at all
+// reads as "—" and keeps the sale out of every profit figure, while a cost left in doubt
+// by a void is a real number that is quietly wrong.
+function costCell(p) {
+    if (p.cost_review_needed) {
+        return `<td class="cost-suspect" title="${t('A voided restock left this cost in doubt — check it against the invoice')}">`
+            + `${formatRupiah(p.cost_price)} ⚠</td>`;
+    }
+    if (p.cost_price > 0) return `<td>${formatRupiah(p.cost_price)}</td>`;
+    return `<td class="cost-unknown" title="${t('No cost recorded — sales of this product are left out of profit')}">—</td>`;
+}
+
 function loadProducts() {
     const search = document.getElementById('searchProduct').value;
     let url = '/api/products?';
     if (search) url += 'search=' + encodeURIComponent(search) + '&';
+    if (needsCostOnly) url += 'needs_cost=1&';
     fetch(url).then(r => r.json()).then(products => {
         const tbody = document.getElementById('productsBody');
         if (!products.length) {
-            tbody.innerHTML = `<tr><td colspan="6" class="empty-row">${t('No products found')}</td></tr>`;
+            const empty = needsCostOnly ? t('Every product has a cost recorded') : t('No products found');
+            tbody.innerHTML = `<tr><td colspan="6" class="empty-row">${empty}</td></tr>`;
             return;
         }
         tbody.innerHTML = products.map(p => `
@@ -142,7 +167,7 @@ function loadProducts() {
                 <td>${escapeHtml(p.sku || '-')}</td>
                 <td>${escapeHtml(p.name)}</td>
                 <td>${formatRupiah(p.price)}</td>
-                <td>${p.cost_price > 0 ? formatRupiah(p.cost_price) : '—'}</td>
+                ${costCell(p)}
                 <td>${p.stock_qty}</td>
                 <td class="action-cell">
                     <button class="btn-icon" onclick="editProduct(${p.id})" title="${t('Edit')}">✏️</button>
@@ -500,10 +525,13 @@ function loadProductPerformance() {
                        formatPercent(p.margin), formatPercent(p.share)],
                  t('No data yet'), 5);
             // A sale missing from the profit figures is missing a cost, not misbehaving.
-            // The same exclusion applies to Gross Profit above, so it is said once.
-            document.getElementById('profit-sellers-note').textContent = d.uncosted_sales
-                ? t('{n} sale(s) excluded from Profit and Gross Profit — cost not recorded yet',
-                    { n: d.uncosted_sales })
+            // The same exclusion applies to Gross Profit above, so it is said once, and
+            // it links to the products that need the cost typed in.
+            const note = document.getElementById('profit-sellers-note');
+            note.innerHTML = d.uncosted_sales
+                ? `<a href="/products?needs_cost=1">${escapeHtml(
+                    t('{n} sale(s) excluded from Profit and Gross Profit — cost not recorded yet',
+                      { n: d.uncosted_sales }))}</a>`
                 : '';
             fill('unsold-body', d.unsold.items,
                  p => [name(p), sku(p), p.stock_qty, formatRupiah(p.stock_value)],
@@ -829,7 +857,16 @@ function loadSelfUseHistory() {
 
 /* ===== Init ===== */
 document.addEventListener('DOMContentLoaded', () => {
-    if (document.getElementById('productsBody')) loadProducts();
+    if (document.getElementById('productsBody')) {
+        // ?needs_cost=1 arrives from the profit notes elsewhere; reflect it in the chip
+        // so the filtered view does not look like the whole catalogue.
+        if (new URLSearchParams(location.search).get('needs_cost') === '1'
+            && document.getElementById('needsCostChip')) {
+            needsCostOnly = true;
+            document.getElementById('needsCostChip').classList.add('active');
+        }
+        loadProducts();
+    }
     if (document.getElementById('ordersBody')) loadOrders();
     if (document.getElementById('trendChart')) loadSalesData();
     if (document.getElementById('reportMonth')) loadReportMonths();

@@ -94,6 +94,22 @@ def build_date_filter(start, end, column='o.created_at'):
 
 # --- Products ---
 
+# Products whose cost figure cannot be relied on, in the two ways that can happen:
+# nothing was ever recorded (0 = unknown, see _COSTED_LINE below), or a void left a
+# figure standing that the restock behind it no longer supports. Stock on hand is part
+# of the first case only -- a product sitting at zero costs nothing until it is
+# restocked, and that restock will record a cost -- while a suspect figure is worth
+# fixing whether or not there is stock, because sales already snapshotted it.
+NEEDS_COST = "(cost_review_needed = 1 OR (cost_price <= 0 AND stock_qty > 0))"
+
+
+def count_needs_cost(db):
+    """How many active products need a cost typed in or checked."""
+    return db.execute(
+        f"SELECT COUNT(*) AS n FROM products WHERE is_archived = 0 AND {NEEDS_COST}"
+    ).fetchone()['n']
+
+
 def list_products(db, page=0, page_size=8, search=None):
     """Active products for browsing. Returns (rows, has_more)."""
     query = "SELECT * FROM products WHERE is_archived = 0"

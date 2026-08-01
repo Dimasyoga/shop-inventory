@@ -9,6 +9,13 @@
 <div class="card">
     <div class="table-controls">
         <input type="text" id="searchProduct" class="search-input" placeholder="{{ t('Search products...') }}" oninput="loadProducts()">
+        {# Only offered when there is something to fix: a chip reading "0" is noise. #}
+        {% if needs_cost_count %}
+        <button type="button" class="filter-chip" id="needsCostChip" onclick="toggleNeedsCost()"
+                title="{{ t('Products with no cost recorded, or a cost a voided restock left in doubt') }}">
+            {{ t('Needs cost') }} ({{ needs_cost_count }})
+        </button>
+        {% endif %}
     </div>
     <table class="data-table" id="productsTable">
         <thead>

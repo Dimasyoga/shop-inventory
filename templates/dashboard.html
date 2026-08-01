@@ -49,8 +49,9 @@
         <div class="stat-info">
             <div class="stat-value">{{ gross_profit }}</div>
             <div class="stat-label">{{ t('Gross Profit ({month})', month=month_label) }}</div>
+            {# Links into the filtered products view: the count is a to-do, not trivia. #}
             {% if uncosted_sales %}
-            <div class="table-note">{{ t('{n} sale(s) excluded — cost not recorded yet', n=uncosted_sales) }}</div>
+            <div class="table-note"><a href="{{ url_for('products_page') }}?needs_cost=1">{{ t('{n} sale(s) excluded — cost not recorded yet', n=uncosted_sales) }}</a></div>
             {% endif %}
         </div>
     </div>

@@ -235,7 +235,9 @@ def dashboard():
 def products_page():
     products = g.db.execute(
         "SELECT * FROM products WHERE is_archived = 0 ORDER BY name").fetchall()
-    return render_template('products.html', products=products, format_rupiah=format_rupiah)
+    return render_template('products.html', products=products,
+                           needs_cost_count=services.count_needs_cost(g.db),
+                           format_rupiah=format_rupiah)
 
 @app.route('/api/products', methods=['GET'])
 @login_required
@@ -246,6 +248,8 @@ def api_products():
     if search:
         query += " AND (name LIKE ? OR sku LIKE ?)"
         params.extend([f'%{search}%', f'%{search}%'])
+    if request.args.get('needs_cost') == '1':
+        query += f" AND ({services.NEEDS_COST})"
     query += " ORDER BY name"
     products = g.db.execute(query, params).fetchall()
     return jsonify([dict(r) for r in products])
@@ -294,12 +298,18 @@ def api_update_product(id):
     try:
         # stock_qty is deliberately not updatable here: overwriting it from a stale edit
         # form would erase concurrent sales. Stock changes go through orders and restock.
+        #
+        # Typing a cost here is the one thing that clears cost_review_needed: the flag
+        # says the recorded figure is suspect, and only a person looking at the invoice
+        # can settle that. A later restock deliberately does not clear it -- _blend_cost
+        # would average the new cost onto the suspect base, so the doubt survives.
         g.db.execute("""
             UPDATE products SET name=?, sku=?, price=?, cost_price=?, reorder_threshold=?,
+                   cost_review_needed = CASE WHEN ? > 0 THEN 0 ELSE cost_review_needed END,
                    updated_at=CURRENT_TIMESTAMP
             WHERE id=?
         """, (fields['name'], fields['sku'], fields['price'], fields['cost_price'],
-              fields['reorder_threshold'], id))
+              fields['reorder_threshold'], fields['cost_price'], id))
         g.db.commit()
         return jsonify({'success': True})
     except sqlite3.IntegrityError:

@@ -78,6 +78,19 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 }
 .search-input:focus, select:focus { outline: none; border-color: #4361ee; }
 select { padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; }
+.filter-chip {
+    padding: 8px 14px; border: 1px solid #f39c12; border-radius: 999px;
+    background: #fff; color: #b9770e; font-size: 14px; cursor: pointer;
+    transition: all 0.2s; white-space: nowrap;
+}
+.filter-chip:hover { background: #fdf3e3; }
+.filter-chip.active { background: #f39c12; color: #fff; }
+
+/* Cost that cannot be trusted, in the two ways it happens: never recorded, or left in
+   doubt by a voided restock. Different marks, because "—" and a wrong number are
+   different problems for the shop owner. */
+.cost-unknown { color: #999; }
+.cost-suspect { color: #b9770e; font-weight: 600; cursor: help; }
 
 /* Buttons */
 .btn {

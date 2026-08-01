@@ -108,6 +108,14 @@ TRANSLATIONS = {
             'Stok dikelola melalui pesanan dan halaman Restok, dan tidak dapat diubah di sini.',
         'Reorder Threshold': 'Ambang Pemesanan Ulang',
         'No products found': 'Tidak ada produk ditemukan',
+        'Needs cost': 'Perlu harga modal',
+        'Products with no cost recorded, or a cost a voided restock left in doubt':
+            'Produk tanpa harga modal tercatat, atau harga modal yang diragukan karena restok dibatalkan',
+        'Every product has a cost recorded': 'Semua produk sudah memiliki harga modal',
+        'No cost recorded — sales of this product are left out of profit':
+            'Harga modal belum tercatat — penjualan produk ini tidak dihitung dalam laba',
+        'A voided restock left this cost in doubt — check it against the invoice':
+            'Restok yang dibatalkan membuat harga modal ini diragukan — cocokkan dengan faktur',
         'Product saved': 'Produk tersimpan',
         'Archive this product?': 'Arsipkan produk ini?',
         'Product archived': 'Produk diarsipkan',
