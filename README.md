@@ -116,6 +116,8 @@ shop-inventory/
 ├── shop.db             # SQLite database file
 ├── reports/            # Archived monthly report PDFs (gitignored)
 ├── start.sh            # Startup script
+├── backup.sh           # Timestamped backup via SQLite's online backup API
+├── restore.sh          # Restore a backup, with checks and a safety copy first
 ├── static/
 │   ├── css/style.css   # Application styles
 │   ├── fonts/          # Vendored DejaVu TTFs for PDF rendering
@@ -379,10 +381,9 @@ inventory.
 ```
 
 Uses SQLite's online backup API, so it is safe to run while the shop is using the
-app — unlike `cp`, which can capture a torn file. `backup.sh` prints the restore
-command. The Telegram bot token inside is encrypted and the key is not included,
-so a backup that goes astray does not leak the bot (see
-[Secrets at rest](#secrets-at-rest)). Worth putting in cron:
+app — unlike `cp`, which can capture a torn file. The Telegram bot token inside is
+encrypted and the key is not included, so a backup that goes astray does not leak
+the bot (see [Secrets at rest](#secrets-at-rest)). Worth putting in cron:
 
 ```
 0 22 * * * cd /path/to/shop-inventory && ./backup.sh >> backups/backup.log 2>&1
@@ -391,6 +392,32 @@ so a backup that goes astray does not leak the bot (see
 `backup.sh` copies **only the database**. Monthly report PDFs are regenerable from
 it at any time, so they are not backed up — but if a signed-off PDF is your audit
 record of record, copy `/data/reports` separately.
+
+Nothing prunes old backups; a nightly cron job will fill the disk eventually. Add
+your own `find backups -name 'shop-*.db' -mtime +30 -delete` if that matters.
+
+### Restoring
+
+```bash
+./restore.sh                                  # lists what you have
+./restore.sh backups/shop-20260801-220000.db  # restores that one
+```
+
+Before touching anything it checks the file is a readable, intact SQLite database
+with this app's tables in it, and prints what is inside — product and order counts,
+and the date of the most recent order — so you can confirm you picked the right
+file. Then it asks you to type `restore` to go ahead (`--yes` skips the prompt for
+scripted use).
+
+**A restore is itself undoable.** The current database is saved to
+`backups/pre-restore-<timestamp>.db` before it is replaced, so restoring the wrong
+file costs one more run rather than the shop's history.
+
+If the app is running under Docker it is stopped, the database replaced inside the
+volume, and the app brought back up and waited on until `/healthz` reports healthy.
+Otherwise the local `shop.db` is replaced and you start the app yourself. Either way
+the `-wal`/`-shm` sidecars are removed first: leftover write-ahead frames from the
+old database would otherwise be replayed straight back on top of the restored file.
 
 ### Secrets at rest
 

@@ -43,13 +43,11 @@ fi
 
 echo "Wrote $OUT_DIR/$NAME"
 echo
-echo "To restore, stop the app and replace the database. The -wal/-shm removal"
-echo "matters: leftover WAL frames from the old database would be replayed on"
-echo "top of the restored file."
-echo "  docker compose down"
-echo "  docker compose run --rm -T --entrypoint sh app -c \\"
-echo "    'rm -f /data/shop.db-wal /data/shop.db-shm && cat > /data/shop.db' < $OUT_DIR/$NAME"
-echo "  docker compose up -d"
+echo "To restore:"
+echo "  ./restore.sh $OUT_DIR/$NAME"
+echo
+echo "It checks the file is an intact shop database, saves the current one aside"
+echo "first, and handles stopping and restarting the app."
 echo
 echo "The bot token in this file is encrypted. Restoring it somewhere without"
 echo "the matching key (SHOP_ENCRYPTION_KEY, or /data/.encryption_key in the"
