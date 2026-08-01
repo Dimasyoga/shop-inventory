@@ -47,6 +47,17 @@ bilingual (English / Bahasa Indonesia).
   `i18n.month_name` / `weekday_abbr`, never `strftime('%b')`. Bot config
   (language, whitelist, token, timezone, thresholds) is re-read every poll cycle,
   so web-UI changes apply with no restart.
+- **Indexes live in one `executescript` at the very end of `init_db()`**, after every
+  migration, because several cover columns the `ALTER TABLE` blocks above add — build
+  them earlier and an upgrade of an old database fails on a column that does not exist
+  yet. `CREATE INDEX IF NOT EXISTS` makes the block idempotent on its own, so it needs
+  no `PRAGMA` guard. SQLite indexes primary keys and UNIQUE columns by itself but *not*
+  foreign keys, which is what every one of these is for. `tests/test_indexes.py` asserts
+  on `EXPLAIN QUERY PLAN`, not on timings: the shop's own database is small enough that
+  a scan is invisible, so an index the planner declines to use would cost writes and buy
+  nothing with no test noticing. Adding one means adding the plan assertion that
+  justifies it. `stock_logs` is deliberately left unindexed — every sale, restock and
+  self use writes to it and nothing reads it back.
 - **Migrations** live in `init_db()` and must be idempotent (guard with
   `PRAGMA table_info` / `sqlite_master` checks). New columns go both in the
   `CREATE TABLE` block *and* a guarded `ALTER TABLE` for existing DBs. *Removing* a

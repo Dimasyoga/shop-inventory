@@ -366,3 +366,28 @@ def test_a_later_run_leaves_live_reservations_alone(pre_reservation_db):
     database.init_db()
     assert query(pre_reservation_db, "SELECT reserved_qty FROM products WHERE id = 3") == [
         {"reserved_qty": 9}]
+
+
+# --- Indexes, on a database that predates them ---
+
+def test_an_upgraded_database_gets_the_indexes(legacy_db):
+    names = {r["name"] for r in query(
+        legacy_db, "SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%'")}
+    # Ordinary ones, on columns the old schema already had.
+    assert "idx_order_items_order" in names
+    assert "idx_orders_created" in names
+    # And the ones whose columns this very run adds: voids_batch_id arrives by ALTER
+    # TABLE above, so building the index before the migrations would fail outright on
+    # an old database. This is what pins the index block to the end of init_db.
+    assert "idx_restock_batches_voids" in names
+    assert "idx_self_use_batches_voids" in names
+
+
+def test_indexes_reach_a_database_that_had_no_self_use_tables(pre_reservation_db):
+    # self_use_batches did not exist in this schema at all; init_db creates it, and the
+    # index has to land on the freshly created table in the same pass.
+    names = {r["name"] for r in query(
+        pre_reservation_db,
+        "SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%'")}
+    assert "idx_self_use_items_batch" in names
+    assert "idx_products_active_name" in names

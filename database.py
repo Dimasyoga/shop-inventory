@@ -464,5 +464,42 @@ def init_db():
                       (encrypt_secret(row[0]), key))
             log.info('encrypted setting %r at rest', key)
 
+    # Indexes. Last in init_db on purpose: several cover columns that the migrations
+    # above add to an older database, and an index cannot be built on a column that
+    # does not exist yet. IF NOT EXISTS makes the whole block idempotent by itself.
+    #
+    # SQLite indexes primary keys and UNIQUE columns on its own, but not foreign keys,
+    # so joining a batch or an order to its lines was a full table scan of every line
+    # the shop had ever written. Deliberately absent: stock_logs, which the app writes
+    # and never reads back -- an index there would cost every restock and sale a write
+    # to serve no query.
+    c.executescript('''
+        -- Order lines by their order: order detail, the orders list, and the join
+        -- behind every sales figure and the monthly report.
+        CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_id);
+        -- Order lines by product: the product performance ranking groups by it, and
+        -- a void counts the sales that snapshotted the cost it is undoing.
+        CREATE INDEX IF NOT EXISTS idx_order_items_product ON order_items(product_id);
+        -- Completed orders in a date window -- the shape of nearly every sales query.
+        -- Status leads because it is the equality; created_at then narrows in order.
+        CREATE INDEX IF NOT EXISTS idx_orders_status_created ON orders(status, created_at);
+        -- Newest-first with no status filter: the orders page and the bot's list. The
+        -- composite above cannot serve this, since its leading column is not the sort.
+        CREATE INDEX IF NOT EXISTS idx_orders_created ON orders(created_at);
+        -- Batch lines, for the history expanders and the report.
+        CREATE INDEX IF NOT EXISTS idx_restock_items_batch ON restock_items(batch_id);
+        CREATE INDEX IF NOT EXISTS idx_self_use_items_batch ON self_use_items(batch_id);
+        -- One product's restock history in batch order, which is what the void cost
+        -- checks walk to decide whether a snapshot can still be restored.
+        CREATE INDEX IF NOT EXISTS idx_restock_items_product ON restock_items(product_id, batch_id);
+        -- The void back-links. Each history page runs one correlated subquery per row
+        -- to ask "was this voided?", so without these the page is quadratic in batches.
+        CREATE INDEX IF NOT EXISTS idx_restock_batches_voids ON restock_batches(voids_batch_id);
+        CREATE INDEX IF NOT EXISTS idx_self_use_batches_voids ON self_use_batches(voids_batch_id);
+        -- The active catalogue in name order: the products page, the order form and
+        -- every product picker in the bot.
+        CREATE INDEX IF NOT EXISTS idx_products_active_name ON products(is_archived, name);
+    ''')
+
     conn.commit()
     conn.close()

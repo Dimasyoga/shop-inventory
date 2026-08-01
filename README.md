@@ -181,6 +181,9 @@ The database is created automatically on first run. `database.py` handles:
 | `self_use_batches` | Self-use batch header (total retail value per batch, void link) |
 | `self_use_items` | Self-use line items (product, qty, price snapshot, subtotal) |
 
+Indexes are created by `init_db()` alongside the tables, so they appear on an existing
+database the first time you start an updated build — there is nothing to run by hand.
+
 ---
 
 ## 3. Running the Application
