@@ -245,7 +245,12 @@ Werkzeug debugger (never on an untrusted network).
 - **One worker, always.** `BotPoller` is an in-process thread holding a single
   `getUpdates` offset and the store is one SQLite file, so a second worker or
   replica duplicates every bot message and doubles stale-order alerts. Scale with
-  `--threads`. This is why the Dockerfile pins `--workers 1`.
+  `--threads`. This is why the Dockerfile pins `--workers 1`. A second reason has
+  since been measured: `app._login_failures` is process memory, so N workers give an
+  attacker 5×N attempts before any bucket locks — going multi-worker means moving the
+  throttle into shared state *first*, not as a follow-up. See the limits below before
+  reaching for workers to fix a latency problem; the one that motivates it usually
+  is not one.
 - **State lives outside the source tree.** `SHOP_DB_PATH` and
   `SHOP_SECRET_KEY_PATH` point into the `/data` volume. Keep `database.DB_PATH` a
   module-level name read at call time inside `get_db()` — `tests/conftest.py`
@@ -263,3 +268,51 @@ Werkzeug debugger (never on an untrusted network).
   `database.DB_PATH` idiom (module-level, env-overridable, read at call time) and
   points into `/data` in Docker; `tests/conftest.py` redirects it to `tmp_path` so
   no test can leave a PDF behind.
+
+## Measured limits (so nobody re-optimizes what is already fine)
+
+Taken against a synthetic database of two years at a thousand orders and three hundred
+restocks a month — 24k orders, 60k order lines, 7.2k restock batches, 82k stock logs,
+13.7 MB — with the app under real gunicorn (`--workers 1 --threads 8`). Numbers here
+exist to stop the next person spending a week on the wrong thing; re-measure before
+trusting them against a much larger shop.
+
+- **The monthly PDF render is the real ceiling, and it is the only one.** ~2.1 ms per
+  sale line, linear and confirmed over a 16× range: 621 lines → 1.6 s, 2,493 → 5.3 s,
+  10,035 → 21.1 s. Extrapolated, it reaches gunicorn's `--timeout 60` at roughly 28,000
+  sale lines, or about **11,000 completed orders a month** — where the worker is killed
+  mid-render and the download simply fails. That is the point at which the render has to
+  move off the request thread (a job the page polls, or the poller pre-building the
+  month). Nothing else in the app is within an order of magnitude of breaking, and the
+  fingerprint archive already means a month is normally rendered once rather than per
+  download.
+- **A long render does *not* block the app**, which is worth knowing because it reads
+  like it should. Measured during a 6.15 s render: 225 concurrent requests completed,
+  median 2.1 ms against a 1.8 ms baseline, p95 285 ms, max 391 ms. Python switches
+  threads often enough that a CPU-bound request degrades tail latency rather than
+  stopping service. Do not reach for `--workers` over this — see the login throttle note
+  above for what that would cost.
+- **The SQLite pragmas are already right; leave them.** On the real disk (ext4/nvme,
+  *not* the tmpfs a scratch benchmark lands on): raising `cache_size` from the 2 MB
+  default to 16 MB or 64 MB changed the sales-page queries by nothing at all
+  (52.9 → 53.1 ms), because the cost is CPU grouping rows, not I/O. `ANALYZE` likewise
+  changed nothing — the plans already pick the right indexes. `synchronous=NORMAL` *is*
+  a real 25× on writes (5.17 ms → 0.21 ms per order), and is still the wrong trade: at a
+  thousand orders a month that is 1.4 writes an hour, so it buys latency nobody can
+  perceive and pays for it by making a power cut able to lose committed orders. `FULL`
+  stays.
+- **Deep pagination is not a problem.** Orders page 2,300 is 1.0 ms and stock movements
+  page 3,000 is 12.7 ms; every list walks an index backwards and stops at the page size.
+  Keyset pagination would buy nothing.
+- **Known and accepted:** `/api/sales/product-performance?unit=year` is ~47 ms, five
+  aggregate passes over one window where two would do. Collapsing them means
+  restructuring the costed-vs-uncosted-line semantics that `top_products_by_profit`,
+  `sales_missing_cost` and the monthly report all share — a real risk to the profit
+  figures for 28 ms on a page that already renders in 47. `?unit=year` on the trend
+  endpoint is ~33 ms for the same reason and is bucketed in Python deliberately (see the
+  timezone note in `api_sales_trend`).
+- **Catalogue size is a different axis from order volume** and this shop is not near it.
+  At 5,000 products (against 120 today) `/api/products` is 1.3 MB / 36 ms and the order,
+  restock and self-use pages each embed ~673 KB of product JSON for their `<select>`
+  pickers. Paging the products *table* is easy; the pickers genuinely need the whole
+  catalogue, so the fix there is a typeahead — a UI change, not a query one.
