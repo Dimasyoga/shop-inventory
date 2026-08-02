@@ -170,6 +170,13 @@ bilingual (English / Bahasa Indonesia).
   separate actions in Settings on purpose — the figure says what customers were
   promised, so it gets shown before anything rewrites it. Resist making repair
   automatic for the same reason `cost_review_needed` does not clear itself.
+  `_DRIFT_SQL` aggregates the open order lines **once** and left-joins that onto
+  products — never a correlated subquery per product, which is what it was: finding the
+  few lines still open meant walking every line each product had ever sold, so the check
+  cost grew with the shop's whole order history (194 ms at two years of a thousand
+  orders a month — the slowest endpoint in the app, and the same query `bootstrap()`
+  runs at startup). What it should depend on is how many orders are *open*, and those do
+  not accumulate. `tests/test_reservation_drift.py` asserts on the plan, not a timing.
 - **Sessions are an idle window, and API routes answer 401 rather than redirecting.**
   `app.permanent_session_lifetime` is `SHOP_SESSION_HOURS` (default 12) and sign-in sets
   `session.permanent = True`; Flask checks the window against the cookie's own signature

@@ -394,16 +394,27 @@ def cancel_order(db, order_id):
 # a lost release leaves units held by an order that no longer exists. Either way the
 # symptom is a shop owner looking at stock on the shelf that the app refuses to sell,
 # with nothing in the UI to explain it and no way back short of editing the database.
+#
+# The held total is aggregated once over the open orders and then joined onto products,
+# rather than recomputed per product by a correlated subquery. The two forms return the
+# same rows, but the correlated one walks every line a product has ever sold to find the
+# few that are still open, so its cost grew with the shop's whole order history: at two
+# years of a thousand orders a month it took 194 ms, the slowest endpoint in the app and
+# the same query the startup drift check runs. What this actually depends on is the
+# number of *open* orders, which does not accumulate -- they get completed or cancelled.
 _DRIFT_SQL = f"""
-    SELECT id, name, reserved_qty, expected FROM (
-        SELECT p.id AS id, p.name AS name, p.reserved_qty AS reserved_qty,
-               COALESCE((SELECT SUM(oi.quantity) FROM order_items oi
-                         JOIN orders o ON o.id = oi.order_id
-                         WHERE oi.product_id = p.id
-                           AND o.status IN ({','.join('?' * len(OPEN_STATUSES))})), 0) AS expected
-        FROM products p
-    ) WHERE reserved_qty != expected
-    ORDER BY name
+    SELECT p.id AS id, p.name AS name, p.reserved_qty AS reserved_qty,
+           COALESCE(h.held, 0) AS expected
+    FROM products p
+    LEFT JOIN (
+        SELECT oi.product_id AS product_id, SUM(oi.quantity) AS held
+        FROM order_items oi
+        JOIN orders o ON o.id = oi.order_id
+        WHERE o.status IN ({','.join('?' * len(OPEN_STATUSES))})
+        GROUP BY oi.product_id
+    ) h ON h.product_id = p.id
+    WHERE p.reserved_qty != COALESCE(h.held, 0)
+    ORDER BY p.name
 """
 
 

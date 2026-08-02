@@ -143,6 +143,34 @@ def test_the_products_page_offers_the_archived_chip_only_when_there_is_one(clien
     assert 'Archived (1)' in client.get('/products').get_data(as_text=True)
 
 
+def test_the_page_does_not_select_the_catalogue_it_never_renders(client, db_path, monkeypatch):
+    """/products renders no product rows -- loadProducts() fills the table from
+    /api/products, which is also what the search box and the filter chips re-fetch.
+
+    The route selected every active product into a template variable products.html
+    ignores, so each page load built the whole catalogue to throw it away. The orders
+    page carried the same dead query once; this pins it shut here.
+    """
+    import app as app_module
+    product(name='Kopi')
+    seen = []
+    real = database.get_db
+
+    def traced():
+        conn = real()
+        conn.set_trace_callback(lambda sql: seen.append(' '.join(sql.split())))
+        return conn
+
+    # app.py imported get_db by name, so its own reference is the one that matters.
+    monkeypatch.setattr(app_module, 'get_db', traced)
+    assert client.get('/products').status_code == 200
+
+    selects = [q for q in seen if 'FROM products' in q and q.lstrip().upper().startswith('SELECT')]
+    # Only the two counts behind the chips: archived, and needs-cost. Neither returns rows.
+    assert selects, 'the trace hook caught nothing -- the test is not watching the route'
+    assert all('COUNT(' in q.upper() for q in selects), selects
+
+
 def test_count_needs_cost_matches_the_filter(client, db_path):
     product(name='Uncosted', cost_price=0, stock_qty=4)
     product(name='Suspect', cost_price=11000, cost_review_needed=1)

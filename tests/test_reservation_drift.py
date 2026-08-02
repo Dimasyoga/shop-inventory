@@ -79,6 +79,48 @@ def test_completed_and_cancelled_orders_justify_nothing(db_path):
     conn.close()
 
 
+def test_the_check_reads_the_open_orders_not_the_whole_history(db_path):
+    """What the check costs must depend on how many orders are *open*, not on how many
+    the shop has ever taken -- open orders do not accumulate, closed ones do.
+
+    The query recomputed the held total per product with a correlated subquery, so
+    finding the handful of lines still open meant walking every line that product had
+    ever sold: 194 ms at two years of a thousand orders a month, the slowest endpoint
+    in the app, and the same query bootstrap() runs at startup. Asserted on the plan
+    rather than a timing, like tests/test_indexes.py and for the same reason: the
+    shop's own database is far too small for the difference to show up as one.
+    """
+    conn = database.get_db()
+    plan = ' '.join(r[3] for r in conn.execute(
+        'EXPLAIN QUERY PLAN ' + services._DRIFT_SQL, services.OPEN_STATUSES))
+    conn.close()
+    # The open orders are aggregated once, up front...
+    assert 'MATERIALIZE' in plan
+    # ...and reached through the status index rather than by reading every order.
+    assert 'idx_orders_status_created' in plan
+    # A correlated subquery here is the regression: it re-runs per product.
+    assert 'CORRELATED' not in plan
+
+
+def test_a_long_closed_history_does_not_change_the_answer(db_path):
+    """The behavioural half of the above: whatever the plan does, piling up completed
+    orders against a product must leave the drift figures exactly where they were."""
+    pid = product(stock=500)
+    conn = database.get_db()
+    services.create_order(conn, [{'product_id': pid, 'quantity': 3}])
+    set_reserved(pid, 8)
+    before = [tuple(r) for r in services.reservation_drift(conn)]
+
+    for _ in range(20):
+        done = services.create_order(conn, [{'product_id': pid, 'quantity': 2}])
+        services.confirm_order(conn, done['order_id'])
+        services.complete_order(conn, done['order_id'])
+    set_reserved(pid, 8)  # the completions moved the counter; put the drift back
+
+    assert [tuple(r) for r in services.reservation_drift(conn)] == before
+    conn.close()
+
+
 def test_over_holding_is_reported_with_both_figures(db_path):
     pid = product()
     conn = database.get_db()

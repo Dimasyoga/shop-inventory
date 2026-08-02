@@ -370,11 +370,13 @@ def dashboard():
 @app.route('/products')
 @login_required
 def products_page():
-    products = g.db.execute(
-        "SELECT * FROM products WHERE is_archived = 0 ORDER BY name").fetchall()
+    # No product rows here on purpose: the table body is filled by loadProducts() from
+    # /api/products, which is also what the search and the filter chips re-fetch. This
+    # route used to select the whole active catalogue into a template variable that
+    # products.html never rendered -- the same dead query the orders page was carrying.
     archived_count = g.db.execute(
         "SELECT COUNT(*) AS n FROM products WHERE is_archived = 1").fetchone()['n']
-    return render_template('products.html', products=products,
+    return render_template('products.html',
                            needs_cost_count=services.count_needs_cost(g.db),
                            archived_count=archived_count,
                            format_rupiah=format_rupiah)

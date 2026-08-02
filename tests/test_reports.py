@@ -412,13 +412,20 @@ def test_a_month_still_running_is_re_rendered_as_it_fills(db_path, shop, renders
 
 def test_a_missing_stamp_re_renders_rather_than_serving_a_stale_pdf(db_path, shop, renders):
     """The archive can outlive its sidecar -- an older release wrote no stamp at all,
-    and a restore may bring back only the PDFs. Missing means unknown, not valid."""
+    and a restore may bring back only the PDFs. Missing means unknown, not valid.
+
+    Only the render count is asserted, deliberately: two renders of identical records
+    are *not* byte-identical, because fpdf2 stamps /CreationDate and a random /ID from
+    the real clock. Comparing the bytes here would pass or fail on whether the two
+    renders happened to land in the same second. The cache-hit tests above do compare
+    bytes, and correctly -- an archive hit returns the stored bytes verbatim.
+    """
     shop.order("2026-06-10 03:00:00", qty=3)
-    path, first, _ = build()
+    build()
     os.remove(os.path.join(reports.REPORT_DIR, "shop-report-2026-06.sha256"))
     _, second, _ = build()
     assert renders == ["2026-06", "2026-06"]
-    assert second == first  # same records, so the same report -- just paid for again
+    assert second.startswith(b"%PDF-")
 
 
 def test_a_stamp_whose_pdf_is_gone_re_renders(db_path, shop, renders):
