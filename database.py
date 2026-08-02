@@ -509,6 +509,15 @@ def init_db():
         -- to ask "was this voided?", so without these the page is quadratic in batches.
         CREATE INDEX IF NOT EXISTS idx_restock_batches_voids ON restock_batches(voids_batch_id);
         CREATE INDEX IF NOT EXISTS idx_self_use_batches_voids ON self_use_batches(voids_batch_id);
+        -- Batches newest-first, and batches within a date window. One index covers both
+        -- because they are the same walk: services._list_batches sorts on
+        -- (created_at DESC, id DESC) and an index entry carries the rowid, which id is,
+        -- so a page is a backwards scan that stops at the page size with nothing sorted.
+        -- The window form is what sales_summary and the monthly report filter on, and
+        -- both tables grow by a row per invoice forever -- summing a month's restock
+        -- spend was reading every batch the shop had ever recorded.
+        CREATE INDEX IF NOT EXISTS idx_restock_batches_created ON restock_batches(created_at);
+        CREATE INDEX IF NOT EXISTS idx_self_use_batches_created ON self_use_batches(created_at);
         -- The active catalogue in name order: the products page, the order form and
         -- every product picker in the bot.
         CREATE INDEX IF NOT EXISTS idx_products_active_name ON products(is_archived, name);

@@ -8,7 +8,9 @@ Like services.py this module takes an open sqlite3 connection and must not impor
 app.py -- both the web routes and the Telegram bot render reports.
 """
 import csv
+import hashlib
 import io
+import json
 import logging
 import os
 from datetime import datetime, timezone
@@ -515,11 +517,76 @@ def save(content, period):
     return path
 
 
+# --- Reusing an archived render ---
+
+# Collecting a month costs milliseconds; rendering it costs seconds -- fpdf2 lays out
+# and measures every cell, so the bill grows with the month's sale lines and reached
+# roughly six seconds at a thousand orders. That is six seconds of CPU inside a server
+# pinned to one worker (see AGENTS.md), which blocks every other request and, through
+# the GIL, the bot poller with it. build() used to pay it again on every single
+# download of the same closed month.
+#
+# The fingerprint is over the collected data, so anything that would change a figure --
+# a late completion landing in the window, a void, a renamed product, a different
+# language -- misses and re-renders. Only an identical report is served from disk.
+
+def fingerprint(data, lang):
+    """Stable hash of everything render() draws, for reusing an archived PDF.
+
+    ``generated_at`` is deliberately excluded: it changes on every collect() and would
+    make the hash miss every time. Serving the archive keeps the timestamp of the
+    render that actually produced it, which is what the line claims to say.
+
+    ``default=str`` covers the datetimes and the ZoneInfo; the timezone is in the hash
+    because it decides where the month starts.
+    """
+    payload = {k: v for k, v in data.items() if k != 'generated_at'}
+    return hashlib.sha256(json.dumps(
+        {'lang': lang, 'data': payload}, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def _stamp_path(period):
+    return os.path.join(REPORT_DIR, report_filename(period, 'sha256'))
+
+
+def _archived(period, stamp):
+    """The archived PDF for `period` if it was rendered from exactly `stamp`, else None.
+
+    Any unreadable or mismatched sidecar simply misses, so a corrupt archive costs a
+    re-render rather than serving the wrong month's figures.
+    """
+    try:
+        with open(_stamp_path(period)) as f:
+            if f.read().strip() != stamp:
+                return None
+        with open(os.path.join(REPORT_DIR, report_filename(period)), 'rb') as f:
+            return f.read()
+    except OSError:
+        return None
+
+
 def build(db, offset, tz, lang, now=None):
-    """Collect, render and archive one month. Returns (path, content, data)."""
+    """Collect, render and archive one month. Returns (path, content, data).
+
+    Serves the archived PDF when the month's records still hash to what produced it,
+    which is the common case for a closed month: it is downloaded repeatedly and cannot
+    change on its own.
+    """
     data = collect(db, offset, tz, lang, now=now)
+    stamp = fingerprint(data, lang)
+    path = os.path.join(REPORT_DIR, report_filename(data['period']))
+    cached = _archived(data['period'], stamp)
+    if cached is not None:
+        log.info('monthly report %s served from the archive at %s (%d bytes)',
+                 data['period'], path, len(cached))
+        return path, cached, data
     content = render(data, i18n.make_t(lang))
     path = save(content, data['period'])
+    # After the PDF, never before: a crash between the two leaves no stamp, which
+    # misses and re-renders. The reverse would serve a stamp for a file that is not
+    # there yet, or worse, for the previous render of the month.
+    with open(_stamp_path(data['period']), 'w') as f:
+        f.write(stamp)
     log.info('monthly report %s written to %s (%d bytes)',
              data['period'], path, len(content))
     return path, content, data

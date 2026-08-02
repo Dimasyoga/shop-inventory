@@ -15,6 +15,17 @@ def stamp(dt):
     return dt.strftime("%Y-%m-%d %H:%M:%S")
 
 
+# Both histories are paged, so the body is {batches, has_more, page} rather than the
+# bare array it used to be. These unwrap one page for the tests that only care about
+# the rows; test_batch_history_pagination.py covers the envelope itself.
+def restock_history(client, query="period=all"):
+    return client.get(f"/api/restock/history?{query}").get_json()["batches"]
+
+
+def self_use_history(client, query="period=all"):
+    return client.get(f"/api/self-use/history?{query}").get_json()["batches"]
+
+
 # --- Restock history ---
 
 def test_history_all_returns_200(client, insert):
@@ -22,7 +33,7 @@ def test_history_all_returns_200(client, insert):
     insert("restock_batches", stamp(utc_now()), total_cost=50000)
     res = client.get("/api/restock/history?period=all")
     assert res.status_code == 200
-    assert len(res.get_json()) == 1
+    assert len(res.get_json()["batches"]) == 1
 
 
 @pytest.mark.parametrize("period", ["today", "week", "month", "year"])
@@ -35,7 +46,7 @@ def test_history_period_filters_do_not_500(client, insert, period):
 def test_history_orders_newest_first(client, insert):
     insert("restock_batches", "2026-07-10 03:00:00", total_cost=100)
     insert("restock_batches", "2026-07-12 03:00:00", total_cost=200)
-    rows = client.get("/api/restock/history?period=all").get_json()
+    rows = restock_history(client)
     assert [r["total_cost"] for r in rows] == [200, 100]
 
 
@@ -51,7 +62,7 @@ def test_history_today_uses_client_timezone_boundary(client, insert):
     insert("restock_batches", stamp(this_morning.astimezone(timezone.utc)), total_cost=111)
     insert("restock_batches", stamp(late_yesterday.astimezone(timezone.utc)), total_cost=999)
 
-    rows = client.get(f"/api/restock/history?period=today&tz={JAKARTA}").get_json()
+    rows = restock_history(client, f"period=today&tz={JAKARTA}")
     costs = [r["total_cost"] for r in rows]
     assert 111 in costs
     assert 999 not in costs
@@ -74,7 +85,7 @@ def test_history_includes_nested_items(client, insert):
     conn.commit()
     conn.close()
 
-    rows = client.get("/api/restock/history?period=all").get_json()
+    rows = restock_history(client)
     assert rows[0]["items"][0]["product_name"] == "Kopi"
 
 
@@ -84,7 +95,7 @@ def test_self_use_history_all_returns_200(client, insert):
     insert("self_use_batches", stamp(utc_now()), total_value=50000)
     res = client.get("/api/self-use/history?period=all")
     assert res.status_code == 200
-    assert len(res.get_json()) == 1
+    assert len(res.get_json()["batches"]) == 1
 
 
 @pytest.mark.parametrize("period", ["today", "week", "month", "year"])
@@ -97,7 +108,7 @@ def test_self_use_history_period_filters_do_not_500(client, insert, period):
 def test_self_use_history_orders_newest_first(client, insert):
     insert("self_use_batches", "2026-07-10 03:00:00", total_value=100)
     insert("self_use_batches", "2026-07-12 03:00:00", total_value=200)
-    rows = client.get("/api/self-use/history?period=all").get_json()
+    rows = self_use_history(client)
     assert [r["total_value"] for r in rows] == [200, 100]
 
 
@@ -111,7 +122,7 @@ def test_self_use_history_today_uses_client_timezone_boundary(client, insert):
     insert("self_use_batches", stamp(late_yesterday.astimezone(timezone.utc)), total_value=999)
 
     values = [r["total_value"] for r in
-              client.get(f"/api/self-use/history?period=today&tz={JAKARTA}").get_json()]
+              self_use_history(client, f"period=today&tz={JAKARTA}")]
     assert 111 in values
     assert 999 not in values
 
@@ -122,7 +133,7 @@ def test_self_use_history_rejects_bad_period(client):
 
 def test_self_use_history_includes_nested_items(client, insert, product):
     client.post("/api/self-use", json={"items": [{"product_id": product, "qty": 3}]})
-    rows = client.get("/api/self-use/history?period=all").get_json()
+    rows = self_use_history(client)
     assert rows[0]["items"][0]["product_name"] == "Kopi"
     assert rows[0]["items"][0]["quantity"] == 3
 
@@ -132,7 +143,7 @@ def test_self_use_history_includes_nested_items(client, insert, product):
 def test_void_restock_reverses_the_batch(client, product):
     client.post("/api/restock", json={
         "items": [{"product_id": product, "qty": 5, "unit_price": 1000}]})
-    batch = client.get("/api/restock/history?period=all").get_json()[0]
+    batch = restock_history(client)[0]
 
     res = client.post(f"/api/restock/{batch['id']}/void")
     assert res.status_code == 200
@@ -140,7 +151,7 @@ def test_void_restock_reverses_the_batch(client, product):
     assert body["success"] is True
     assert body["restored"] == ["Kopi"]
 
-    rows = client.get("/api/restock/history?period=all").get_json()
+    rows = restock_history(client)
     void = next(r for r in rows if r["voids_batch_id"])
     original = next(r for r in rows if r["id"] == batch["id"])
     assert void["voids_batch_id"] == batch["id"]
@@ -151,7 +162,7 @@ def test_void_restock_reverses_the_batch(client, product):
 def test_void_restock_rejects_a_second_void(client, product):
     client.post("/api/restock", json={
         "items": [{"product_id": product, "qty": 5, "unit_price": 1000}]})
-    batch_id = client.get("/api/restock/history?period=all").get_json()[0]["id"]
+    batch_id = restock_history(client)[0]["id"]
     client.post(f"/api/restock/{batch_id}/void")
 
     res = client.post(f"/api/restock/{batch_id}/void")
@@ -165,10 +176,10 @@ def test_void_restock_on_a_missing_batch_is_404(client):
 
 def test_void_self_use_puts_the_stock_back(client, product):
     client.post("/api/self-use", json={"items": [{"product_id": product, "qty": 3}]})
-    batch_id = client.get("/api/self-use/history?period=all").get_json()[0]["id"]
+    batch_id = self_use_history(client)[0]["id"]
 
     assert client.post(f"/api/self-use/{batch_id}/void").status_code == 200
-    rows = client.get("/api/self-use/history?period=all").get_json()
+    rows = self_use_history(client)
     assert next(r for r in rows if r["id"] == batch_id)["voided_by"] is not None
     products = client.get("/api/products").get_json()
     assert next(p for p in products if p["id"] == product)["stock_qty"] == 10

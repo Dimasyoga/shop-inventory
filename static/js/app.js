@@ -895,11 +895,15 @@ document.addEventListener('click', e => {
         (group || document).querySelectorAll('.btn-period').forEach(b => b.classList.remove('active'));
         e.target.classList.add('active');
         const which = group && group.dataset.history;
+        // Back to page 1: the new period holds different batches, so keeping the
+        // page number lands the seller somewhere arbitrary or past the end.
         if (which === 'selfuse') {
             selfUsePeriod = e.target.dataset.period;
+            selfUseHistoryPage = 0;
             loadSelfUseHistory();
         } else if (which === 'restock') {
             restockPeriod = e.target.dataset.period;
+            restockHistoryPage = 0;
             loadRestockHistory();
         }
     }
@@ -1038,11 +1042,44 @@ function voidSelfUse(id) {
         .catch(err => showToast(err.message, 'error'));
 }
 
+// Both batch histories page identically, and the markup is the orders pager's. Hidden
+// entirely on a single page of results: a pager offering nothing to page to is just
+// furniture. Page numbers are 1-based here and 0-based on the wire.
+function renderHistoryPager(pagerId, navFn, page, hasMore) {
+    const pager = document.getElementById(pagerId);
+    if (!pager) return;
+    if (!hasMore && page === 0) {
+        pager.innerHTML = '';
+        return;
+    }
+    pager.innerHTML = `
+        <button class="btn btn-secondary" onclick="${navFn}(-1)"
+                ${page === 0 ? 'disabled' : ''}>${t('◀ Prev')}</button>
+        <span class="pager-label">${t('Page {n}', { n: page + 1 })}</span>
+        <button class="btn btn-secondary" onclick="${navFn}(1)"
+                ${hasMore ? '' : 'disabled'}>${t('Next ▶')}</button>
+    `;
+}
+
+let restockHistoryPage = 0;
+
+function goToRestockHistoryPage(delta) {
+    restockHistoryPage = Math.max(0, restockHistoryPage + delta);
+    loadRestockHistory();
+}
+
 function loadRestockHistory() {
-    fetchJson(`/api/restock/history?period=${restockPeriod}&tz=${encodeURIComponent(CLIENT_TZ)}`)
-        .then(d => {
+    fetchJson(`/api/restock/history?period=${restockPeriod}&page=${restockHistoryPage}`
+              + `&tz=${encodeURIComponent(CLIENT_TZ)}`)
+        .then(res => {
+            const d = res.batches || [];
             const tbody = document.getElementById('restockHistoryBody');
+            renderHistoryPager('restockHistoryPager', 'goToRestockHistoryPage',
+                               restockHistoryPage, res.has_more);
             if (!d.length) {
+                // An empty page past the end is reachable by switching to a shorter
+                // period; step back rather than claiming there is no history at all.
+                if (restockHistoryPage > 0) return goToRestockHistoryPage(-1);
                 tbody.innerHTML = `<tr><td colspan="5" class="empty-row">${t('No restock history yet')}</td></tr>`;
                 return;
             }
@@ -1132,11 +1169,23 @@ function submitSelfUse() {
     }).catch(err => showToast(err.message, 'error'));
 }
 
+let selfUseHistoryPage = 0;
+
+function goToSelfUseHistoryPage(delta) {
+    selfUseHistoryPage = Math.max(0, selfUseHistoryPage + delta);
+    loadSelfUseHistory();
+}
+
 function loadSelfUseHistory() {
-    fetchJson(`/api/self-use/history?period=${selfUsePeriod}&tz=${encodeURIComponent(CLIENT_TZ)}`)
-        .then(d => {
+    fetchJson(`/api/self-use/history?period=${selfUsePeriod}&page=${selfUseHistoryPage}`
+              + `&tz=${encodeURIComponent(CLIENT_TZ)}`)
+        .then(res => {
+            const d = res.batches || [];
             const tbody = document.getElementById('selfUseHistoryBody');
+            renderHistoryPager('selfUseHistoryPager', 'goToSelfUseHistoryPage',
+                               selfUseHistoryPage, res.has_more);
             if (!d.length) {
+                if (selfUseHistoryPage > 0) return goToSelfUseHistoryPage(-1);
                 tbody.innerHTML = `<tr><td colspan="5" class="empty-row">${t('No self use history yet')}</td></tr>`;
                 return;
             }

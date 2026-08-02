@@ -470,6 +470,82 @@ def list_stock_movements(db, product_id=None, page=0, page_size=25):
     return [dict(r) for r in rows[:page_size]], len(rows) > page_size
 
 
+# --- Batch history (restock and self use) ---
+
+# The two batch kinds differ only in their columns, so the paging is written once and
+# the table names are interpolated -- as in _voidable_batch, and for the same reason:
+# they are module constants below, never anything a caller supplies.
+_RESTOCK_HISTORY = {
+    'table': 'restock_batches',
+    'item_table': 'restock_items',
+    'columns': ('id', 'subtotal_cost', 'discount', 'shipping_cost', 'admin_fee',
+                'total_cost', 'created_at', 'voids_batch_id'),
+}
+_SELF_USE_HISTORY = {
+    'table': 'self_use_batches',
+    'item_table': 'self_use_items',
+    'columns': ('id', 'total_value', 'created_at', 'voids_batch_id'),
+}
+
+
+def _list_batches(db, spec, start=None, end=None, page=0, page_size=10):
+    """One page of batches newest-first, each carrying its ``items``.
+
+    Returns (batches, has_more), the same contract as list_orders, and costs the same
+    fixed two queries: the page, then every line on it in one IN query. Both history
+    tables used to be read whole -- no LIMIT at all -- and then fan a query out per
+    batch for its lines, so opening the restock page cost one query per batch the shop
+    had ever recorded and shipped the lot to the browser in a single JSON array.
+
+    ``voided_by`` is the other half of voids_batch_id: a batch knows what it reverses,
+    and this correlated subquery says what reversed it, so one row carries both states.
+    It rides idx_%_batches_voids and now runs for a page rather than for every batch.
+
+    Ordered by ``created_at DESC, id DESC`` rather than created_at alone. The column is
+    second-resolution and a restock invoice is entered in one sitting, so several
+    batches sharing a timestamp is ordinary here -- an unstable tiebreak would let one
+    cross the page boundary between requests and show up twice or not at all. id is the
+    rowid, so the created_at index carries it and serves the sort without a pass over
+    the table.
+    """
+    cols = ', '.join(f'b.{c}' for c in spec['columns'])
+    query = (f"SELECT {cols},"
+             f" (SELECT v.id FROM {spec['table']} v WHERE v.voids_batch_id = b.id) AS voided_by"
+             f" FROM {spec['table']} b WHERE 1=1")
+    params = []
+    if start and end:
+        clause, date_params = build_date_filter(start, end, 'b.created_at')
+        query += clause
+        params += list(date_params)
+    query += " ORDER BY b.created_at DESC, b.id DESC LIMIT ? OFFSET ?"
+    params += [page_size + 1, page * page_size]
+    rows = db.execute(query, params).fetchall()
+    batches = [dict(r) for r in rows[:page_size]]
+    if batches:
+        marks = ', '.join('?' * len(batches))
+        lines = db.execute(f"""
+            SELECT i.*, p.name AS product_name, p.sku AS product_sku
+            FROM {spec['item_table']} i JOIN products p ON i.product_id = p.id
+            WHERE i.batch_id IN ({marks}) ORDER BY i.id
+        """, [b['id'] for b in batches]).fetchall()
+        by_batch = {}
+        for line in lines:
+            by_batch.setdefault(line['batch_id'], []).append(dict(line))
+        for batch in batches:
+            batch['items'] = by_batch.get(batch['id'], [])
+    return batches, len(rows) > page_size
+
+
+def list_restock_batches(db, start=None, end=None, page=0, page_size=10):
+    """One page of restock batches with their lines. Returns (batches, has_more)."""
+    return _list_batches(db, _RESTOCK_HISTORY, start, end, page, page_size)
+
+
+def list_self_use_batches(db, start=None, end=None, page=0, page_size=10):
+    """One page of self-use batches with their lines. Returns (batches, has_more)."""
+    return _list_batches(db, _SELF_USE_HISTORY, start, end, page, page_size)
+
+
 # --- Restock ---
 
 def allocate_restock_costs(items, discount=0, shipping_cost=0, admin_fee=0):

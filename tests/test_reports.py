@@ -325,6 +325,125 @@ def test_build_collects_renders_and_archives(db_path, shop):
         assert f.read() == content
 
 
+# --- Reusing an archived render ---
+#
+# Rendering a month costs seconds of CPU (fpdf2 measures every cell) in a server pinned
+# to one worker, and every download of the same closed month used to pay it again.
+
+
+@pytest.fixture
+def renders(monkeypatch):
+    """Counts how many times build() actually rendered, rather than served the archive."""
+    calls = []
+    real = reports.render
+
+    def counted(data, t):
+        calls.append(data["period"])
+        return real(data, t)
+
+    monkeypatch.setattr(reports, "render", counted)
+    return calls
+
+
+def build(offset=1, lang="en", now=NOW):
+    db = database.get_db()
+    try:
+        return reports.build(db, offset, JKT, lang, now=now)
+    finally:
+        db.close()
+
+
+def test_an_unchanged_month_is_served_from_the_archive(db_path, shop, renders):
+    shop.order("2026-06-10 03:00:00", qty=3)
+    _, first, _ = build()
+    _, second, _ = build()
+    assert renders == ["2026-06"]  # the second call rendered nothing
+    assert second == first
+
+
+def test_a_late_completion_in_the_window_forces_a_re_render(db_path, shop, renders):
+    """The figures changed, so the archived PDF no longer describes the month. An order
+    completed after the month closed still lands in it, which is exactly the case a
+    plain 'closed months never change' rule would get wrong."""
+    shop.order("2026-06-10 03:00:00", qty=3)
+    build()
+    shop.order("2026-06-11 03:00:00", qty=5)
+    _, content, _ = build()
+    assert renders == ["2026-06", "2026-06"]
+    assert content.startswith(b"%PDF-")
+
+
+def test_a_renamed_product_forces_a_re_render(db_path, shop, renders):
+    # Nothing numeric moved, but the PDF prints the name on every line it appears in.
+    shop.order("2026-06-10 03:00:00", qty=3)
+    build()
+    conn = database.get_db()
+    conn.execute("UPDATE products SET name = 'Kopi Susu'")
+    conn.commit()
+    conn.close()
+    build()
+    assert renders == ["2026-06", "2026-06"]
+
+
+def test_the_other_language_is_not_served_the_english_archive(db_path, shop, renders):
+    shop.order("2026-06-10 03:00:00", qty=3)
+    build(lang="en")
+    build(lang="id")
+    assert renders == ["2026-06", "2026-06"]
+
+
+def test_the_clock_alone_does_not_invalidate_the_archive(db_path, shop, renders):
+    """generated_at moves on every collect() and is left out of the hash, or nothing
+    would ever hit. Both of these resolve offset=1 to June."""
+    shop.order("2026-06-10 03:00:00", qty=3)
+    build(now=NOW)
+    build(now=datetime(2026, 7, 20, 18, 30, tzinfo=JKT))
+    assert renders == ["2026-06"]
+
+
+def test_a_month_still_running_is_re_rendered_as_it_fills(db_path, shop, renders):
+    # offset=0 is the incomplete month: each sale changes it, so it must not stick.
+    shop.order("2026-07-02 03:00:00", qty=1)
+    build(offset=0)
+    shop.order("2026-07-03 03:00:00", qty=2)
+    build(offset=0)
+    assert renders == ["2026-07", "2026-07"]
+
+
+def test_a_missing_stamp_re_renders_rather_than_serving_a_stale_pdf(db_path, shop, renders):
+    """The archive can outlive its sidecar -- an older release wrote no stamp at all,
+    and a restore may bring back only the PDFs. Missing means unknown, not valid."""
+    shop.order("2026-06-10 03:00:00", qty=3)
+    path, first, _ = build()
+    os.remove(os.path.join(reports.REPORT_DIR, "shop-report-2026-06.sha256"))
+    _, second, _ = build()
+    assert renders == ["2026-06", "2026-06"]
+    assert second == first  # same records, so the same report -- just paid for again
+
+
+def test_a_stamp_whose_pdf_is_gone_re_renders(db_path, shop, renders):
+    shop.order("2026-06-10 03:00:00", qty=3)
+    path, _, _ = build()
+    os.remove(path)
+    build()
+    assert renders == ["2026-06", "2026-06"]
+    assert os.path.exists(path)
+
+
+def test_repeated_downloads_of_a_closed_month_render_once(client, shop, renders):
+    """The route this was built for: the seller clicking Download twice.
+
+    No `now` to pin here -- the route reads the real clock, so which month offset=1
+    lands on depends on when the suite runs. The render count is the point.
+    """
+    shop.order("2026-06-10 03:00:00", qty=3)
+    first = client.get("/api/reports/monthly?offset=1")
+    second = client.get("/api/reports/monthly?offset=1")
+    assert first.status_code == second.status_code == 200
+    assert second.data == first.data
+    assert len(renders) == 1
+
+
 # --- Web routes ---
 
 def test_download_returns_a_pdf_attachment(client, shop):

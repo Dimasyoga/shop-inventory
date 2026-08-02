@@ -706,52 +706,44 @@ def api_restock_void(id):
         return _service_error(e)
     return jsonify({'success': True, **result})
 
+# Batch history pages. Smaller than the orders page because every row expands into a
+# per-product breakdown, so ten batches is already a long page.
+HISTORY_PAGE_SIZE = 10
+
+def _history_window():
+    """(start, end, error) for a batch-history request's ``period``/``tz`` params.
+
+    A period of 'all' is (None, None) -- no window, every batch, which paging now makes
+    affordable. Anything unrecognised is a 400 rather than a silent full listing.
+    """
+    period = request.args.get('period', 'all')
+    unit = {'today': 'day', 'week': 'week', 'month': 'month', 'year': 'year'}.get(period)
+    if unit:
+        start, end = get_date_range(unit, 0, _client_tz(request.args.get('tz')))
+        return start, end, None
+    if period != 'all':
+        return None, None, _err('invalid period')
+    return None, None, None
+
+def _history_page():
+    """Validated page number for a batch-history request. Returns (page, error)."""
+    page = _int_arg('page')
+    if page is None or page < 0:
+        return None, _err('Invalid page')
+    return page, None
+
 @app.route('/api/restock/history', methods=['GET'])
 @login_required
 def api_restock_history():
-    period = request.args.get('period', 'all')
-    tz = _client_tz(request.args.get('tz'))
-    # voided_by is the other half of voids_batch_id: a batch knows what it reverses, and
-    # the join says what reversed it, so one row carries both states for the table.
-    query = """
-        SELECT rb.id, rb.subtotal_cost, rb.discount, rb.shipping_cost, rb.admin_fee,
-               rb.total_cost, rb.created_at, rb.voids_batch_id,
-               (SELECT v.id FROM restock_batches v WHERE v.voids_batch_id = rb.id) AS voided_by
-        FROM restock_batches rb
-        WHERE 1=1
-    """
-    params = ()
-    unit = {'today': 'day', 'week': 'week', 'month': 'month', 'year': 'year'}.get(period)
-    if unit:
-        start, end = get_date_range(unit, 0, tz)
-        clause, params = build_date_filter(start, end, 'rb.created_at')
-        query += clause
-    elif period != 'all':
-        return _err('invalid period')
-    query += " ORDER BY rb.created_at DESC"
-    batches = g.db.execute(query, params).fetchall()
-    result = []
-    for b in batches:
-        items = g.db.execute("""
-            SELECT ri.*, p.name as product_name, p.sku as product_sku
-            FROM restock_items ri
-            JOIN products p ON ri.product_id = p.id
-            WHERE ri.batch_id = ?
-            ORDER BY ri.id
-        """, (b['id'],)).fetchall()
-        result.append({
-            'id': b['id'],
-            'subtotal_cost': b['subtotal_cost'],
-            'discount': b['discount'],
-            'shipping_cost': b['shipping_cost'],
-            'admin_fee': b['admin_fee'],
-            'total_cost': b['total_cost'],
-            'created_at': b['created_at'],
-            'voids_batch_id': b['voids_batch_id'],
-            'voided_by': b['voided_by'],
-            'items': [dict(i) for i in items]
-        })
-    return jsonify(result)
+    start, end, err = _history_window()
+    if err:
+        return err
+    page, err = _history_page()
+    if err:
+        return err
+    batches, has_more = services.list_restock_batches(
+        g.db, start=start, end=end, page=page, page_size=HISTORY_PAGE_SIZE)
+    return jsonify({'batches': batches, 'has_more': has_more, 'page': page})
 
 # --- Self Use ---
 @app.route('/self-use')
@@ -799,42 +791,15 @@ def api_self_use_void(id):
 @app.route('/api/self-use/history', methods=['GET'])
 @login_required
 def api_self_use_history():
-    period = request.args.get('period', 'all')
-    tz = _client_tz(request.args.get('tz'))
-    query = """
-        SELECT sb.id, sb.total_value, sb.created_at, sb.voids_batch_id,
-               (SELECT v.id FROM self_use_batches v WHERE v.voids_batch_id = sb.id) AS voided_by
-        FROM self_use_batches sb
-        WHERE 1=1
-    """
-    params = ()
-    unit = {'today': 'day', 'week': 'week', 'month': 'month', 'year': 'year'}.get(period)
-    if unit:
-        start, end = get_date_range(unit, 0, tz)
-        clause, params = build_date_filter(start, end, 'sb.created_at')
-        query += clause
-    elif period != 'all':
-        return _err('invalid period')
-    query += " ORDER BY sb.created_at DESC"
-    batches = g.db.execute(query, params).fetchall()
-    result = []
-    for b in batches:
-        items = g.db.execute("""
-            SELECT su.*, p.name as product_name, p.sku as product_sku
-            FROM self_use_items su
-            JOIN products p ON su.product_id = p.id
-            WHERE su.batch_id = ?
-            ORDER BY su.id
-        """, (b['id'],)).fetchall()
-        result.append({
-            'id': b['id'],
-            'total_value': b['total_value'],
-            'created_at': b['created_at'],
-            'voids_batch_id': b['voids_batch_id'],
-            'voided_by': b['voided_by'],
-            'items': [dict(i) for i in items]
-        })
-    return jsonify(result)
+    start, end, err = _history_window()
+    if err:
+        return err
+    page, err = _history_page()
+    if err:
+        return err
+    batches, has_more = services.list_self_use_batches(
+        g.db, start=start, end=end, page=page, page_size=HISTORY_PAGE_SIZE)
+    return jsonify({'batches': batches, 'has_more': has_more, 'page': page})
 
 # --- Settings ---
 def _parse_whitelist(raw):

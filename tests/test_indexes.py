@@ -20,6 +20,8 @@ EXPECTED = {
     'idx_restock_items_product',
     'idx_restock_batches_voids',
     'idx_self_use_batches_voids',
+    'idx_restock_batches_created',
+    'idx_self_use_batches_created',
     'idx_products_active_name',
     'idx_stock_logs_product',
 }
@@ -104,6 +106,37 @@ def test_the_void_back_link_is_not_a_scan_per_row(db_path):
         db_path, "SELECT id FROM restock_batches WHERE voids_batch_id = 1")
     assert 'idx_self_use_batches_voids' in plan(
         db_path, "SELECT id FROM self_use_batches WHERE voids_batch_id = 1")
+
+
+BATCH_PAGE = ("SELECT b.id FROM {table} b {where}"
+              " ORDER BY b.created_at DESC, b.id DESC LIMIT 11 OFFSET 0")
+
+
+def test_a_batch_history_page_is_a_backwards_walk_and_needs_no_sort(db_path):
+    """services._list_batches, behind the restock and self-use history tables.
+
+    The sort is (created_at DESC, id DESC) and an index entry carries the rowid, which
+    id is -- so the index already holds the rows in exactly that order and a page is a
+    backwards scan that stops at the page size. Sorting instead would mean ordering
+    every batch the shop has ever recorded to render ten of them.
+    """
+    for table in ('restock_batches', 'self_use_batches'):
+        p = plan(db_path, BATCH_PAGE.format(table=table, where=''))
+        assert f'idx_{table}_created' in p
+        assert 'TEMP B-TREE' not in p
+
+
+def test_a_months_batches_are_a_range_seek(db_path):
+    """The same index serves the windowed form: the history page's period filter, and
+    the sums behind sales_summary's restock cost and self-use value, which the dashboard
+    runs on every load. Without it, totalling one month reads every batch ever written.
+    """
+    for table in ('restock_batches', 'self_use_batches'):
+        p = plan(db_path, BATCH_PAGE.format(
+            table=table,
+            where="WHERE b.created_at >= '2026-07-01' AND b.created_at < '2026-08-01'"))
+        assert f'idx_{table}_created' in p
+        assert 'TEMP B-TREE' not in p
 
 
 def test_the_active_catalogue_comes_back_in_name_order(db_path):

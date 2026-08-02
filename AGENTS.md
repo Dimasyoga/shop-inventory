@@ -69,6 +69,17 @@ bilingual (English / Bahasa Indonesia).
   not `created_at` alone — the column is second-resolution, and an unstable tiebreak
   lets a row cross the page boundary between requests and be shown twice or skipped.
   `tests/test_orders_pagination.py` pins the query count with sqlite3's trace hook.
+  The restock and self-use histories follow the same contract through one shared
+  implementation, `services._list_batches` — `{batches, has_more, page}`, two queries a
+  page, `created_at DESC, id DESC`. They are the reason the rule is written down: both
+  were read whole with no `LIMIT` anywhere and then fanned a query out per batch for its
+  lines, so opening `/restock` cost a query per batch the shop had ever recorded and
+  shipped the lot to the browser as one array, which the page rendered into a single
+  `innerHTML`. At two years of a thousand orders and three hundred restocks a month
+  that measured 7,201 queries and 5.8 MB to show ten rows.
+  `tests/test_batch_history_pagination.py` is parametrized over both, because they are
+  one implementation behind two endpoints and a fix that lands on only one side is the
+  regression worth catching.
 - **Indexes live in one `executescript` at the very end of `init_db()`**, after every
   migration, because several cover columns the `ALTER TABLE` blocks above add — build
   them earlier and an upgrade of an old database fails on a column that does not exist
@@ -183,6 +194,20 @@ bilingual (English / Bahasa Indonesia).
   `i18n.translate_error`; `str(e)` still yields English for logs.
 - **The bot poller** advances its update offset even when handling an update
   throws, so a poison update never loops.
+- **A month is rendered once, then served from the archive.** Collecting a month costs
+  milliseconds; rendering it costs *seconds* — fpdf2 measures every cell, so the bill
+  grows with the month's sale lines and reached ~6 s at a thousand orders. That is six
+  seconds of CPU in a server pinned to one worker, blocking every other request and,
+  through the GIL, the bot poller — and `build()` used to pay it again on every download
+  of the same closed month. It now hashes the collected data plus the language
+  (`reports.fingerprint`) into a `.sha256` sidecar beside the PDF and reuses the archived
+  bytes when the hash still matches. Do **not** replace this with "closed months never
+  change": an order created in June and completed in July moves June's figures, which is
+  exactly what the fingerprint catches and a date rule would not. `generated_at` is the
+  one key left out — it moves on every `collect()` and would make the hash always miss;
+  a served archive keeps the timestamp of the render that really produced it, which is
+  what the line claims. The stamp is written *after* the PDF, so a crash between them
+  leaves no stamp and costs a re-render rather than validating a file that isn't there.
 - **Recurring bot work** hangs off `_cycle` behind a monotonic-deadline check
   (`_maybe_check_alerts`, `_maybe_send_report`), each with its own DB connection
   and a blanket `except Exception: log.exception(...)` so a failing job cannot kill
