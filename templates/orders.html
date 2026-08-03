@@ -8,7 +8,7 @@
 
 <div class="card">
     <div class="table-controls">
-        <input type="text" id="searchOrder" class="search-input" placeholder="{{ t('Search by Order ID...') }}" oninput="reloadOrdersFromStart()">
+        <input type="text" id="searchOrder" class="search-input" placeholder="{{ t('Search by Order ID or buyer...') }}" oninput="reloadOrdersFromStart()">
         <select id="filterStatus" onchange="reloadOrdersFromStart()">
             <option value="">{{ t('All Status') }}</option>
             <option value="draft">{{ t('Draft') }}</option>
@@ -19,7 +19,7 @@
     </div>
     <table class="data-table">
         <thead>
-            <tr><th>{{ t('Order ID') }}</th><th>{{ t('Date') }}</th><th>{{ t('Items') }}</th><th>{{ t('Total') }}</th><th>{{ t('Status') }}</th><th>{{ t('Actions') }}</th></tr>
+            <tr><th>{{ t('Order ID') }}</th><th>{{ t('Date') }}</th><th>{{ t('Buyer') }}</th><th>{{ t('Items') }}</th><th>{{ t('Total') }}</th><th>{{ t('Status') }}</th><th>{{ t('Actions') }}</th></tr>
         </thead>
         <tbody id="ordersBody">
         </tbody>
@@ -43,6 +43,43 @@
             <button type="button" class="btn btn-secondary" onclick="closeOrderModal()">{{ t('Cancel') }}</button>
             <button type="button" class="btn btn-primary" id="orderSubmitBtn" onclick="saveOrder()">{{ t('Create Order') }}</button>
         </div>
+    </div>
+</div>
+
+<!-- Buyer & Payment Modal. Its own form rather than fields on the order modal:
+     a transfer receipt usually turns up after the order was entered, so this has to
+     be reachable on an order that is no longer a draft and can no longer be edited. -->
+<div class="modal" id="paymentModal">
+    <div class="modal-content" style="max-width: 520px">
+        <div class="modal-header">
+            <h3 id="paymentModalTitle">{{ t('Buyer & Payment') }}</h3>
+            <span class="modal-close" onclick="closePaymentModal()">&times;</span>
+        </div>
+        <form id="paymentForm" onsubmit="savePayment(event)">
+            <p class="help-text">{{ t('All optional — fill in what you know.') }}</p>
+            <div class="form-group">
+                <label>{{ t('Buyer Name') }}</label>
+                <input type="text" id="payBuyerName" maxlength="120" autocomplete="off">
+            </div>
+            <div class="form-group">
+                <label>{{ t('Payment Method') }}</label>
+                <select id="payMethod">
+                    <option value="">{{ t('Not recorded') }}</option>
+                    <option value="cash">{{ t('Cash') }}</option>
+                    <option value="bank_transfer">{{ t('Bank Transfer') }}</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>{{ t('Payment Proof') }}</label>
+                <div id="payProofCurrent"></div>
+                <input type="file" id="payProofFile" accept="image/jpeg,image/png,image/webp,application/pdf">
+                <small class="field-warning">{{ t('Invoice or screenshot: JPEG, PNG, WebP or PDF, up to 5 MB.') }}</small>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" onclick="closePaymentModal()">{{ t('Cancel') }}</button>
+                <button type="submit" class="btn btn-primary">{{ t('Save') }}</button>
+            </div>
+        </form>
     </div>
 </div>
 

@@ -177,6 +177,39 @@ bilingual (English / Bahasa Indonesia).
   orders a month — the slowest endpoint in the app, and the same query `bootstrap()`
   runs at startup). What it should depend on is how many orders are *open*, and those do
   not accumulate. `tests/test_reservation_drift.py` asserts on the plan, not a timing.
+- **Buyer and payment details are optional, and editable in every status but cancelled.**
+  `orders.buyer_name` / `orders.payment_method` and the `order_payment_proofs` row all
+  go through one write path, `services.set_order_payment` behind
+  `POST /api/orders/<id>/payment` — deliberately *not* through `create_order` /
+  `update_order`, which are draft-only because the lines are what the customer paid
+  for. A transfer receipt normally arrives after the order is entered and sometimes
+  after it is completed, and none of this touches stock or money, so the same rule
+  would be wrong here. `payment_method` stores a slug from `services.PAYMENT_METHODS`,
+  never a label: the shop runs in two languages and a row holding "Transfer Bank"
+  could not be counted alongside one holding "Bank Transfer". Existing orders stay
+  NULL and are not backfilled, for the same reason `stock_logs.actor` is not.
+  The editor submits every text field it shows, so a blanked box **clears** the
+  column; the file input is the exception, because it cannot be pre-filled with what
+  is stored — empty means "leave it", and `remove_proof` is the only way to delete one.
+- **The proof of payment lives in the database, and its type comes from its bytes.**
+  `backup.sh` and `restore.sh` move `shop.db` and nothing else, so a receipt written to
+  a directory would be outside every backup the shop takes — which is the one thing a
+  record kept for evidence must not be. It is a separate table rather than a column on
+  `orders` because `list_orders` and `get_order` both `SELECT *`, and a BLOB there
+  would pull every screenshot on the page into memory to draw a table that shows none
+  of them; both queries carry a `has_payment_proof` EXISTS instead, and only
+  `services.get_payment_proof` ever reads the bytes. The stored MIME type comes from
+  `services.sniff_proof_type` matching magic bytes, never from the client's declared
+  `Content-Type`, because the value we store is the value we later serve it back as —
+  no SVG in the whitelist for that reason, and PDFs download rather than render
+  inline. The uploader's filename is not kept at all: `payment_proof_filename` derives
+  the download name, so nothing user-supplied reaches a `Content-Disposition` header.
+  `app.config['MAX_CONTENT_LENGTH']` caps every request body, and the `413` handler
+  answers `/api/` in JSON — Flask's own is an HTML page that `api()` would report as a
+  JSON syntax error to someone whose actual problem is that their photo is too big.
+  `apiForm()` in `app.js` is the multipart sibling of `api()` and keeps its contract:
+  it rejects on any non-2xx, so every caller still needs a `.catch`. It sets no
+  `Content-Type` — the browser has to add the multipart boundary itself.
 - **Sessions are an idle window, and API routes answer 401 rather than redirecting.**
   `app.permanent_session_lifetime` is `SHOP_SESSION_HOURS` (default 12) and sign-in sets
   `session.permanent = True`; Flask checks the window against the cookie's own signature

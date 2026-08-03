@@ -242,3 +242,183 @@ def test_cancelling_the_editor_writes_nothing(page, shop):
     expect(page.locator('#orderModal')).not_to_have_class('modal active')
     assert shop.order_lines(order_id) == [(kopi, 2)]
     assert shop.stock_of(kopi) == (10, 2)
+
+
+# --- buyer & payment ---
+#
+# The whole feature is client-side plumbing the API tests cannot reach: a multipart
+# form built by hand, a file input that means "leave it" when empty, and a modal that
+# has to prefill from an order it fetches. apiForm() is also the first fetch in the
+# app that is not api()/fetchJson(), so the 401-and-toast contract has to be shown to
+# hold for it too.
+
+JPEG = b'\xff\xd8\xff\xe0' + b'\x00' * 64
+
+
+def open_payment(page, shop, order_id):
+    page.goto(f'{shop.base_url}/orders')
+    page.locator(
+        f'#ordersBody tr:has(td:text-is("{order_id}")) button[title="Buyer & Payment"]').click()
+    expect(page.locator('#paymentModal')).to_have_class('modal active')
+
+
+def attach_proof(page, data=JPEG, name='receipt.jpg', mime='image/jpeg'):
+    page.locator('#payProofFile').set_input_files(
+        {'name': name, 'mimeType': mime, 'buffer': data})
+
+
+def test_a_cancelled_order_offers_no_payment_button(page, shop):
+    kopi = shop.product('Kopi', 'K-1')
+    live = shop.order([(kopi, 1)], status='completed')
+    dead = shop.order([(kopi, 1)], status='cancelled')
+    page.goto(f'{shop.base_url}/orders')
+
+    sel = 'button[title="Buyer & Payment"]'
+    assert page.locator(f'#ordersBody tr:has(td:text-is("{live}")) {sel}').count() == 1
+    assert page.locator(f'#ordersBody tr:has(td:text-is("{dead}")) {sel}').count() == 0
+
+
+def test_saving_a_buyer_and_method_shows_them_on_the_row(page, shop):
+    kopi = shop.product('Kopi', 'K-1')
+    order_id = shop.order([(kopi, 1)])
+
+    open_payment(page, shop, order_id)
+    page.locator('#payBuyerName').fill('Bu Rina')
+    page.locator('#payMethod').select_option('bank_transfer')
+    page.locator('#paymentModal').get_by_role('button', name='Save').click()
+
+    expect(page.locator('.toast')).to_contain_text('Payment details saved')
+    expect(page.locator('#paymentModal')).not_to_have_class('modal active')
+    assert shop.payment_of(order_id) == ('Bu Rina', 'bank_transfer', None)
+    expect(page.locator(f'#ordersBody tr:has(td:text-is("{order_id}"))')).to_contain_text('Bu Rina')
+
+
+def test_a_completed_order_still_accepts_a_receipt(page, shop):
+    """The reason this is not part of the order editor: the lines of a completed
+    order are frozen, but the transfer receipt often arrives after the sale."""
+    kopi = shop.product('Kopi', 'K-1')
+    order_id = shop.order([(kopi, 1)], status='completed')
+
+    open_payment(page, shop, order_id)
+    page.locator('#payBuyerName').fill('Pak Budi')
+    attach_proof(page)
+    page.locator('#paymentModal').get_by_role('button', name='Save').click()
+
+    expect(page.locator('.toast')).to_contain_text('Payment details saved')
+    assert shop.payment_of(order_id) == ('Pak Budi', None, JPEG)
+    # The paperclip is how the list says a proof exists without shipping the bytes.
+    expect(page.locator(f'#ordersBody tr:has(td:text-is("{order_id}"))')).to_contain_text('📎')
+
+
+def test_the_editor_prefills_from_the_order(page, shop):
+    kopi = shop.product('Kopi', 'K-1')
+    order_id = shop.order([(kopi, 1)])
+
+    open_payment(page, shop, order_id)
+    page.locator('#payBuyerName').fill('Bu Rina')
+    page.locator('#payMethod').select_option('cash')
+    page.locator('#paymentModal').get_by_role('button', name='Save').click()
+    expect(page.locator('.toast')).to_contain_text('Payment details saved')
+
+    open_payment(page, shop, order_id)
+    expect(page.locator('#payBuyerName')).to_have_value('Bu Rina')
+    expect(page.locator('#payMethod')).to_have_value('cash')
+
+
+def test_reopening_and_saving_without_touching_the_file_keeps_the_proof(page, shop):
+    """A file input cannot be pre-filled with what is stored, so an untouched one has
+    to mean "leave it" -- otherwise correcting a buyer's name drops their receipt."""
+    kopi = shop.product('Kopi', 'K-1')
+    order_id = shop.order([(kopi, 1)])
+
+    open_payment(page, shop, order_id)
+    attach_proof(page)
+    page.locator('#paymentModal').get_by_role('button', name='Save').click()
+    expect(page.locator('.toast')).to_contain_text('Payment details saved')
+
+    open_payment(page, shop, order_id)
+    page.locator('#payBuyerName').fill('Bu Rina')
+    page.locator('#paymentModal').get_by_role('button', name='Save').click()
+    expect(page.locator('.toast')).to_contain_text('Payment details saved')
+
+    assert shop.payment_of(order_id) == ('Bu Rina', None, JPEG)
+
+
+def test_removing_a_proof_needs_the_checkbox(page, shop):
+    kopi = shop.product('Kopi', 'K-1')
+    order_id = shop.order([(kopi, 1)])
+
+    open_payment(page, shop, order_id)
+    attach_proof(page)
+    page.locator('#paymentModal').get_by_role('button', name='Save').click()
+    expect(page.locator('.toast')).to_contain_text('Payment details saved')
+
+    open_payment(page, shop, order_id)
+    page.locator('#payRemoveProof').check()
+    page.locator('#paymentModal').get_by_role('button', name='Save').click()
+    expect(page.locator('.toast')).to_contain_text('Payment details saved')
+
+    assert shop.payment_of(order_id)[2] is None
+    expect(page.locator(f'#ordersBody tr:has(td:text-is("{order_id}"))')).not_to_contain_text('📎')
+
+
+def test_a_refused_upload_is_reported_and_stores_nothing(page, shop):
+    """apiForm() rejects on any non-2xx exactly as api() does, and its caller has the
+    .catch that turns the refusal into a toast. Without it the modal would sit open
+    with no explanation -- the failure eight write paths shipped with."""
+    kopi = shop.product('Kopi', 'K-1')
+    order_id = shop.order([(kopi, 1)])
+
+    open_payment(page, shop, order_id)
+    # A file the server will not accept, announcing itself as a JPEG. What it is
+    # judged on is its bytes.
+    attach_proof(page, data=b'<svg onload="alert(1)"/>', name='receipt.jpg')
+    page.locator('#paymentModal').get_by_role('button', name='Save').click()
+
+    expect(page.locator('.toast')).to_contain_text('JPEG, PNG, WebP or PDF')
+    assert shop.payment_of(order_id) == (None, None, None)
+
+
+def test_the_detail_view_links_to_the_proof(page, shop):
+    kopi = shop.product('Kopi', 'K-1')
+    order_id = shop.order([(kopi, 1)])
+
+    open_payment(page, shop, order_id)
+    page.locator('#payBuyerName').fill('Bu Rina')
+    page.locator('#payMethod').select_option('cash')
+    attach_proof(page)
+    page.locator('#paymentModal').get_by_role('button', name='Save').click()
+    expect(page.locator('.toast')).to_contain_text('Payment details saved')
+
+    page.locator(f'#ordersBody tr:has(td:text-is("{order_id}")) button[title="View"]').click()
+    detail = page.locator('#orderDetailContent')
+    expect(detail).to_contain_text('Bu Rina')
+    expect(detail).to_contain_text('Cash')
+    expect(detail.get_by_role('link', name='View proof')).to_have_attribute(
+        'href', f'/api/orders/{order_id}/proof')
+
+
+def test_an_order_with_no_buyer_says_so_rather_than_showing_a_blank(page, shop):
+    kopi = shop.product('Kopi', 'K-1')
+    order_id = shop.order([(kopi, 1)])
+    page.goto(f'{shop.base_url}/orders')
+
+    expect(page.locator(f'#ordersBody tr:has(td:text-is("{order_id}"))')).to_contain_text(
+        'Not recorded')
+
+
+def test_searching_by_buyer_finds_the_order(page, shop):
+    """The question the name was recorded to answer, asked by someone who does not
+    have the order number."""
+    kopi = shop.product('Kopi', 'K-1', stock=50)
+    mine = shop.order([(kopi, 1)])
+    shop.order([(kopi, 1)])
+
+    open_payment(page, shop, mine)
+    page.locator('#payBuyerName').fill('Bu Rina')
+    page.locator('#paymentModal').get_by_role('button', name='Save').click()
+    expect(page.locator('.toast')).to_contain_text('Payment details saved')
+
+    page.locator('#searchOrder').fill('rina')
+    expect(page.locator('#ordersBody tr')).to_have_count(1)
+    assert row_ids(page) == [str(mine)]

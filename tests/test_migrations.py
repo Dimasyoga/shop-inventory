@@ -406,3 +406,27 @@ def test_movements_from_before_the_column_stay_unattributed(legacy_db):
     that admits where it starts."""
     rows = query(legacy_db, "SELECT reason, actor FROM stock_logs")
     assert rows == [{"reason": "sale order #3", "actor": None}]
+
+
+# --- Buyer and payment, on a database that recorded neither ---
+
+def test_the_buyer_and_payment_columns_are_added_to_an_old_database(legacy_db):
+    cols = {r["name"] for r in query(legacy_db, "PRAGMA table_info(orders)")}
+    assert {"buyer_name", "payment_method"} <= cols
+
+
+def test_the_proof_table_reaches_an_old_database(legacy_db):
+    """It is created by the IF NOT EXISTS script rather than a guarded ALTER block,
+    which only works because that script runs against every database, not just new
+    ones. If that ever stops being true this is the test that says so."""
+    tables = {r["name"] for r in query(
+        legacy_db, "SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "order_payment_proofs" in tables
+
+
+def test_orders_from_before_the_columns_have_no_buyer(legacy_db):
+    """NULL, not a placeholder: the shop was taking these orders without asking who
+    for, and inventing a buyer for them would make the column a guess -- the same
+    rule the stock actor follows above."""
+    rows = query(legacy_db, "SELECT buyer_name, payment_method FROM orders")
+    assert rows == [{"buyer_name": None, "payment_method": None}]

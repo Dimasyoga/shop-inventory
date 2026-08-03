@@ -51,6 +51,27 @@ app = Flask(__name__)
 app.secret_key = _load_secret_key()
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 
+# Ceiling on any request body, which until payment proofs existed nothing sent enough
+# of to need one. Without it Werkzeug reads whatever arrives, and one phone video
+# uploaded into the proof field would be held in the memory of a server pinned to a
+# single worker. The slack over services.MAX_PROOF_BYTES is for the multipart envelope,
+# so that a file right at the documented limit is judged by the service -- which can
+# say what the limit is -- rather than cut off at the socket.
+app.config['MAX_CONTENT_LENGTH'] = services.MAX_PROOF_BYTES + 64 * 1024
+
+@app.errorhandler(413)
+def _too_large(e):
+    """A body over MAX_CONTENT_LENGTH, in the shape the caller can use.
+
+    Flask's own 413 is an HTML page. `api()` in app.js parses every response as JSON
+    and would report a syntax error to a seller whose actual problem is that their
+    photo is too big -- the same trap that made /api/ answer 401 rather than redirect.
+    """
+    if request.path.startswith('/api/'):
+        return _err('Payment proof must be {n} MB or smaller', 413,
+                    n=services.MAX_PROOF_BYTES // (1024 * 1024))
+    return e
+
 # How long a session survives without activity. Flask checks this against the
 # signature's own timestamp on every request, so it holds server-side even if the
 # browser keeps sending an old cookie -- and the default, had we left it, is 31 days.
@@ -656,6 +677,60 @@ def api_cancel_order(id):
     except ServiceError as e:
         return _service_error(e)
     return jsonify({'success': True})
+
+@app.route('/api/orders/<int:id>/payment', methods=['POST'])
+@login_required
+def api_order_payment(id):
+    """Buyer name, payment method and proof of payment for one order.
+
+    multipart/form-data rather than JSON, because a receipt is a file. Every text
+    field the editor shows is submitted every time, so an empty box clears the
+    column -- that is what the seller just did to it. The file is the exception: a
+    file input cannot be pre-filled with what is already stored, so an empty one
+    means "leave it", and removing a proof is the explicit remove_proof checkbox.
+    """
+    method = request.form.get('payment_method') or None
+    proof = request.files.get('proof')
+    # A form submitted with no file chosen still carries the field, with an empty
+    # filename. Reading it would store zero bytes over a perfectly good receipt.
+    data = proof.read() if proof and proof.filename else None
+    try:
+        services.set_order_payment(
+            g.db, id,
+            buyer_name=request.form.get('buyer_name'),
+            payment_method=method,
+            proof=data,
+            remove_proof=request.form.get('remove_proof') == '1')
+    except ServiceError as e:
+        return _service_error(e)
+    return jsonify({'success': True})
+
+@app.route('/api/orders/<int:id>/proof', methods=['GET'])
+@login_required
+def api_order_proof(id):
+    """The stored proof of payment, as the type it was found to be.
+
+    The served Content-Type comes from the whitelist the bytes were matched against
+    on upload, never from anything the uploader said, and nosniff stops the browser
+    reconsidering it. PDFs download rather than open inline: an image is what the
+    detail view draws, and a document from outside has no reason to be rendered in
+    the shop's own origin.
+    """
+    try:
+        proof = services.get_payment_proof(g.db, id)
+    except ServiceError as e:
+        return _service_error(e)
+    if not proof:
+        return _err('No payment proof recorded for this order', 404)
+    disposition = 'inline' if proof['mime_type'].startswith('image/') else 'attachment'
+    filename = services.payment_proof_filename(id, proof['mime_type'])
+    return Response(proof['data'], mimetype=proof['mime_type'], headers={
+        'Content-Disposition': f'{disposition}; filename="{filename}"',
+        'X-Content-Type-Options': 'nosniff',
+        # A receipt carries a customer's name and bank details; it is not something
+        # a shared machine's browser cache should keep after the seller signs out.
+        'Cache-Control': 'private, no-store',
+    })
 
 # --- Restock ---
 @app.route('/restock')

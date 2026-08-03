@@ -158,7 +158,9 @@ def init_db():
             total_amount REAL NOT NULL DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            alerted_status TEXT
+            alerted_status TEXT,
+            buyer_name TEXT,
+            payment_method TEXT
         );
 
         CREATE TABLE IF NOT EXISTS order_items (
@@ -171,6 +173,32 @@ def init_db():
             subtotal REAL NOT NULL,
             FOREIGN KEY (order_id) REFERENCES orders(id),
             FOREIGN KEY (product_id) REFERENCES products(id)
+        );
+
+        -- Proof of payment for an order: a transfer receipt or a screenshot of one.
+        -- The bytes live here rather than in a column on orders because list_orders
+        -- and get_order both SELECT *, and a BLOB there would drag every screenshot
+        -- on the page into memory to render a table that shows none of them.
+        --
+        -- They live in the database rather than on disk because backup.sh and
+        -- restore.sh move shop.db and nothing else: a proof written to a directory
+        -- would be outside every backup the shop takes, which is the one thing a
+        -- record kept for evidence must not be.
+        --
+        -- order_id is the primary key, so it is the rowid: one proof per order,
+        -- replaced rather than accumulated, looked up without a second index.
+        --
+        -- The uploader's filename is deliberately not kept. Nothing reads it back --
+        -- the download name is derived from the order number and the stored type --
+        -- and a client-supplied name is the string that ends up in a
+        -- Content-Disposition header, which is not a place to put user input.
+        CREATE TABLE IF NOT EXISTS order_payment_proofs (
+            order_id INTEGER PRIMARY KEY,
+            mime_type TEXT NOT NULL,
+            byte_size INTEGER NOT NULL,
+            data BLOB NOT NULL,
+            uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (order_id) REFERENCES orders(id)
         );
 
         CREATE TABLE IF NOT EXISTS settings (
@@ -304,6 +332,22 @@ def init_db():
     order_cols = [r[1] for r in c.execute("PRAGMA table_info(orders)").fetchall()]
     if 'alerted_status' not in order_cols:
         c.execute("ALTER TABLE orders ADD COLUMN alerted_status TEXT")
+
+    # Migrate: who the order was for and how they paid. Both nullable and both left
+    # NULL on existing rows -- the shop has been taking orders without recording
+    # either, and inventing a buyer for the ones already in the book would make the
+    # column a guess. NULL here means "not recorded", which is also what it means on
+    # an order taken tomorrow where nobody asked.
+    #
+    # payment_method stores the slug ('cash' / 'bank_transfer'), never the label:
+    # the UI runs in two languages, and a row holding "Transfer Bank" could not be
+    # filtered or counted alongside one holding "Bank Transfer".
+    # order_payment_proofs needs no block of its own -- it is created by the
+    # IF NOT EXISTS script above, which runs against old and new databases alike.
+    if 'buyer_name' not in order_cols:
+        c.execute("ALTER TABLE orders ADD COLUMN buyer_name TEXT")
+    if 'payment_method' not in order_cols:
+        c.execute("ALTER TABLE orders ADD COLUMN payment_method TEXT")
 
     # Migrate: per-product cost, so profit margin becomes computable. Restock used to
     # capture a single batch total and split it across lines in proportion to quantity,

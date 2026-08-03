@@ -75,6 +75,14 @@ async function api(url, method = 'GET', body = null) {
     return jsonOrThrow(await fetch(url, opts));
 }
 
+/* Same contract as api() — rejects on any non-2xx, so every caller needs a .catch —
+   for the one thing JSON cannot carry: a file. No Content-Type header is set on
+   purpose; the browser has to add the multipart boundary itself, and naming the type
+   here would produce a body the server cannot parse. */
+async function apiForm(url, formData, method = 'POST') {
+    return jsonOrThrow(await fetch(url, { method, body: formData }));
+}
+
 /* Wraps a fetch of JSON that renders into the page, surfacing failures as a toast
    instead of an unhandled rejection. Still rethrows, so a caller that would go on to
    render nothing can bail; add .catch(() => {}) when there is nothing more to do. */
@@ -400,19 +408,21 @@ function loadOrders() {
             // draft on it; step back rather than showing "no orders found" over a
             // list that does have some.
             if (ordersPage > 0) return goToOrdersPage(-1);
-            tbody.innerHTML = `<tr><td colspan="6" class="empty-row">${t('No orders found')}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="7" class="empty-row">${t('No orders found')}</td></tr>`;
             return;
         }
         tbody.innerHTML = orders.map(o => `
             <tr>
                 <td>${o.id}</td>
                 <td>${formatLocalDate(o.created_at)}</td>
+                <td>${o.buyer_name ? escapeHtml(o.buyer_name) : `<span class="stock-held">${t('Not recorded')}</span>`}${o.has_payment_proof ? ' 📎' : ''}</td>
                 <td>${t('{n} items', { n: o.items ? o.items.length : 0 })}</td>
                 <td>${formatRupiah(o.total_amount)}</td>
                 <td><span class="badge badge-${o.status}">${o.status === 'confirmed' ? t('Payment Confirmed') : t(o.status)}</span></td>
                 <td class="action-cell">
                     <button class="btn-icon" onclick="viewOrder(${o.id})" title="${t('View')}">👁️</button>
                     ${o.status === 'draft' ? `<button class="btn-icon" onclick="editOrder(${o.id})" title="${t('Edit')}">✏️</button>` : ''}
+                    ${o.status !== 'cancelled' ? `<button class="btn-icon" onclick="openPaymentModal(${o.id})" title="${t('Buyer & Payment')}">💳</button>` : ''}
                     ${o.status === 'draft' ? `<button class="btn-icon" onclick="confirmOrder(${o.id})" title="${t('Confirm')}">✅</button>` : ''}
                     ${o.status === 'confirmed' ? `<button class="btn-icon" onclick="completeOrder(${o.id})" title="${t('Complete')}">💰</button>` : ''}
                     ${o.status === 'draft' || o.status === 'confirmed' ? `<button class="btn-icon" onclick="cancelOrder(${o.id})" title="${t('Cancel')}">❌</button>` : ''}
@@ -652,12 +662,75 @@ function cancelOrder(id) {
     }).catch(err => showToast(err.message, 'error'));
 }
 
+/* ===== Buyer & payment ===== */
+
+// The order whose payment details the modal is editing.
+let payingOrderId = null;
+
+const PAYMENT_METHOD_LABELS = { cash: 'Cash', bank_transfer: 'Bank Transfer' };
+
+// Slug -> label, matching services.PAYMENT_METHOD_LABELS. The stored value is a slug
+// in both languages; only the label it renders as is translated.
+function paymentMethodLabel(method) {
+    return PAYMENT_METHOD_LABELS[method] ? t(PAYMENT_METHOD_LABELS[method]) : t('Not recorded');
+}
+
+function openPaymentModal(id) {
+    fetchJson('/api/orders/' + id).then(o => {
+        payingOrderId = o.id;
+        document.getElementById('paymentModalTitle').textContent =
+            t('Buyer & Payment — Order ID {id}', { id: o.id });
+        document.getElementById('payBuyerName').value = o.buyer_name || '';
+        document.getElementById('payMethod').value = o.payment_method || '';
+        document.getElementById('payProofFile').value = '';
+        // A file input cannot be pre-filled with what is already stored, so the stored
+        // proof is shown as a link plus an explicit way to drop it. Choosing a new file
+        // replaces it; the checkbox is the only way to end up with none.
+        document.getElementById('payProofCurrent').innerHTML = o.has_payment_proof
+            ? `<p class="help-text">
+                   <a href="/api/orders/${o.id}/proof" target="_blank" rel="noopener">${t('View current proof')}</a>
+                   <label style="margin-left:12px">
+                       <input type="checkbox" id="payRemoveProof"> ${t('Remove it')}
+                   </label>
+               </p>`
+            : '';
+        document.getElementById('paymentModal').classList.add('active');
+    }).catch(() => { /* fetchJson has toasted; there is nothing to edit */ });
+}
+
+function closePaymentModal() {
+    payingOrderId = null;
+    document.getElementById('paymentModal').classList.remove('active');
+}
+
+function savePayment(e) {
+    e.preventDefault();
+    const id = payingOrderId;
+    const form = new FormData();
+    form.append('buyer_name', document.getElementById('payBuyerName').value);
+    form.append('payment_method', document.getElementById('payMethod').value);
+    const file = document.getElementById('payProofFile').files[0];
+    if (file) form.append('proof', file);
+    const remove = document.getElementById('payRemoveProof');
+    if (remove && remove.checked) form.append('remove_proof', '1');
+    apiForm('/api/orders/' + id + '/payment', form).then(() => {
+        showToast(t('Payment details saved'));
+        closePaymentModal();
+        loadOrders();
+    }).catch(err => showToast(err.message, 'error'));
+}
+
 function viewOrder(id) {
     fetchJson('/api/orders/' + id).then(o => {
         document.getElementById('detailOrderId').textContent = t('Order ID {id}', { id: o.id });
         let html = `
             <p><strong>${t('Status')}:</strong> <span class="badge badge-${o.status}">${o.status === 'confirmed' ? t('Payment Confirmed') : t(o.status)}</span></p>
             <p><strong>${t('Date')}:</strong> ${formatLocalDate(o.created_at)}</p>
+            <p><strong>${t('Buyer')}:</strong> ${o.buyer_name ? escapeHtml(o.buyer_name) : t('Not recorded')}</p>
+            <p><strong>${t('Payment Method')}:</strong> ${paymentMethodLabel(o.payment_method)}</p>
+            <p><strong>${t('Payment Proof')}:</strong> ${o.has_payment_proof
+                ? `<a href="/api/orders/${o.id}/proof" target="_blank" rel="noopener">${t('View proof')}</a>`
+                : t('Not recorded')}</p>
             <table class="data-table" style="margin:12px 0">
                 <thead><tr><th>${t('Product')}</th><th>${t('Qty')}</th><th>${t('Price')}</th><th>${t('Subtotal')}</th></tr></thead>
                 <tbody>

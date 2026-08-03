@@ -211,9 +211,13 @@ def test_download_csv_saves_the_months_sales_with_the_right_name(page, shop):
     text = open(download.path(), encoding='utf-8-sig').read()
     rows = list(csv.reader(io.StringIO(text)))
     assert rows[0][0] == 'Order'
+    # By name, not by position: the column order lives in tests/test_sales_csv.py and
+    # this test is about the file arriving intact, not about where Product sits.
+    product_col = rows[0].index('Product')
+    qty_col = rows[0].index('Qty')
     # The quote and the comma survive a real parser rather than splitting the row.
-    assert rows[1][2] == AWKWARD
-    assert rows[1][4] == '2'
+    assert rows[1][product_col] == AWKWARD
+    assert rows[1][qty_col] == '2'
 
 
 def test_the_csv_carries_a_bom_for_excel(page, shop):

@@ -86,7 +86,7 @@ def completed_orders(db, start, end):
     """
     date_filter, params = build_date_filter(start, end, 'o.created_at')
     rows = db.execute("""
-        SELECT o.id, o.created_at, o.total_amount,
+        SELECT o.id, o.created_at, o.total_amount, o.buyer_name, o.payment_method,
                oi.quantity, oi.unit_price, oi.unit_cost, oi.subtotal,
                p.name AS product_name, p.sku AS product_sku
         FROM orders o
@@ -95,8 +95,9 @@ def completed_orders(db, start, end):
         WHERE o.status = 'completed'
     """ + date_filter + " ORDER BY o.created_at, o.id, oi.id", params).fetchall()
     # unit_cost rides along for the CSV export; the PDF builds its rows from the
-    # keys it names, so carrying one more costs it nothing.
-    return _group(rows, ('id', 'created_at', 'total_amount'),
+    # keys it names, so carrying one more costs it nothing. Same for payment_method,
+    # which the CSV exports and the PDF leaves out to keep its row on one line.
+    return _group(rows, ('id', 'created_at', 'total_amount', 'buyer_name', 'payment_method'),
                   ('quantity', 'unit_price', 'unit_cost', 'subtotal'))
 
 
@@ -180,6 +181,17 @@ def _num(value):
     return str(int(value)) if float(value).is_integer() else f'{float(value):.2f}'
 
 
+def _payment_label(method, t):
+    """Translated label for a stored payment slug; '' when none was recorded.
+
+    Blank rather than a placeholder for the same reason a missing unit cost exports
+    blank: a spreadsheet can filter an empty cell out, and any word put there would
+    be one more value to explain to whoever sorts the column.
+    """
+    label = services.PAYMENT_METHOD_LABELS.get(method)
+    return t(label) if label else ''
+
+
 def sales_csv(db, offset, tz, lang, now=None):
     """Every sold line of a month, as CSV text.
 
@@ -195,9 +207,15 @@ def sales_csv(db, offset, tz, lang, now=None):
     start, end = get_date_range('month', offset, tz, now=now)
     out = io.StringIO()
     writer = csv.writer(out)
-    writer.writerow([t('Order'), t('Date'), t('Product'), t('SKU'), t('Qty'),
+    writer.writerow([t('Order'), t('Date'), t('Buyer'), t('Payment Method'),
+                     t('Product'), t('SKU'), t('Qty'),
                      t('Unit Price'), t('Unit Cost'), t('Subtotal'), t('Profit')])
     for order in completed_orders(db, start, end):
+        # Repeated on every line of an order, the same way the order number and date
+        # already are: a spreadsheet filters and pivots on a column, and a value that
+        # appears only on an order's first row disappears the moment one is sorted.
+        buyer = order['buyer_name'] or ''
+        method = _payment_label(order['payment_method'], t)
         for item in order['items']:
             # A cost of 0 means "never recorded" everywhere in this app, and a
             # spreadsheet cannot tell that from stock that genuinely cost nothing.
@@ -208,6 +226,8 @@ def sales_csv(db, offset, tz, lang, now=None):
             writer.writerow([
                 order['id'],
                 _local(order['created_at'], tz),
+                buyer,
+                method,
                 item['product_name'] or '',
                 item['product_sku'] or '',
                 item['quantity'],
@@ -397,7 +417,11 @@ def _record_section(pdf, title, note, headings, widths, align, rows, total_row, 
 
 def _sales_section(pdf, data, t):
     tz = data['tz']
-    rows = [(o['id'], _local(o['created_at'], tz), it['product_name'] or '—',
+    # An em dash where no buyer was recorded, matching how a missing product or SKU
+    # already reads here. This is a document to file away, so a blank cell would look
+    # like the renderer dropped something.
+    rows = [(o['id'], _local(o['created_at'], tz), o['buyer_name'] or '—',
+             it['product_name'] or '—',
              it['product_sku'] or '—', it['quantity'],
              format_rupiah(it['unit_price']), format_rupiah(it['subtotal']))
             for o in data['orders'] for it in o['items']]
@@ -405,9 +429,10 @@ def _sales_section(pdf, data, t):
     _record_section(
         pdf, t('Sales Records'),
         t('One row per product sold. Only completed orders are included: drafts, confirmed-but-unpaid and cancelled orders never move stock or revenue.'),
-        [t('Order'), t('Date'), t('Product'), t('SKU'), t('Qty'), t('Unit Price'), t('Subtotal')],
-        widths=(13, 26, 51, 26, 11, 26, 28),
-        align=('RIGHT', 'LEFT', 'LEFT', 'LEFT', 'RIGHT', 'RIGHT', 'RIGHT'),
+        [t('Order'), t('Date'), t('Buyer'), t('Product'), t('SKU'), t('Qty'),
+         t('Unit Price'), t('Subtotal')],
+        widths=(12, 24, 28, 40, 19, 9, 24, 25),
+        align=('RIGHT', 'LEFT', 'LEFT', 'LEFT', 'LEFT', 'RIGHT', 'RIGHT', 'RIGHT'),
         rows=rows,
         total_row=t('Orders: {n} — total {amount}',
                     n=len(data['orders']), amount=format_rupiah(revenue)),

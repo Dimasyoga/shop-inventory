@@ -132,7 +132,7 @@ TRANSLATIONS = {
 
         # --- Orders ---
         '+ New Order': '+ Pesanan Baru',
-        'Search by Order ID...': 'Cari berdasarkan ID Pesanan...',
+        'Search by Order ID or buyer...': 'Cari berdasarkan ID Pesanan atau pembeli...',
         'All Status': 'Semua Status',
         'Order ID': 'ID Pesanan',
         'Items': 'Item',
@@ -161,6 +161,25 @@ TRANSLATIONS = {
         'Stock: {n}': 'Stok: {n}',
         'Available: {n}': 'Tersedia: {n}',
         'Held: {n}': 'Ditahan: {n}',
+
+        # --- Buyer & payment (optional details on an order) ---
+        'Buyer': 'Pembeli',
+        'Buyer Name': 'Nama Pembeli',
+        'Buyer & Payment': 'Pembeli & Pembayaran',
+        'Buyer & Payment — Order ID {id}': 'Pembeli & Pembayaran — Pesanan ID {id}',
+        'All optional — fill in what you know.':
+            'Semuanya opsional — isi yang Anda ketahui.',
+        'Payment Method': 'Metode Pembayaran',
+        'Not recorded': 'Tidak dicatat',
+        'Cash': 'Tunai',
+        'Bank Transfer': 'Transfer Bank',
+        'Payment Proof': 'Bukti Pembayaran',
+        'Invoice or screenshot: JPEG, PNG, WebP or PDF, up to 5 MB.':
+            'Invoice atau tangkapan layar: JPEG, PNG, WebP, atau PDF, maksimal 5 MB.',
+        'View proof': 'Lihat bukti',
+        'View current proof': 'Lihat bukti saat ini',
+        'Remove it': 'Hapus',
+        'Payment details saved': 'Detail pembayaran tersimpan',
 
         # --- Restock ---
         'New Restock': 'Restok Baru',
@@ -442,6 +461,8 @@ TRANSLATIONS = {
         '✅ Save self use': '✅ Simpan pemakaian sendiri',
         'View order': 'Lihat pesanan',
         'Total: {amount}': 'Total: {amount}',
+        'Buyer: {name}': 'Pembeli: {name}',
+        'Paid by: {method}': 'Dibayar dengan: {method}',
         # stale-order alerts (pushed by the bot poller)
         'Order needs attention': 'Pesanan perlu perhatian',
         'Order #{n} — {status}': 'Pesanan #{n} — {status}',
@@ -500,6 +521,17 @@ TRANSLATIONS = {
             'Hanya pesanan yang dikonfirmasi yang dapat diselesaikan',
         'Cannot cancel completed orders': 'Tidak dapat membatalkan pesanan yang sudah selesai',
         'Order already cancelled': 'Pesanan sudah dibatalkan',
+        'Cannot record payment details on a cancelled order':
+            'Tidak dapat mencatat detail pembayaran pada pesanan yang dibatalkan',
+        'Buyer name must be text': 'Nama pembeli harus berupa teks',
+        'Unknown payment method': 'Metode pembayaran tidak dikenal',
+        'The payment proof file is empty': 'Berkas bukti pembayaran kosong',
+        'Payment proof must be {n} MB or smaller':
+            'Bukti pembayaran harus berukuran {n} MB atau kurang',
+        'Payment proof must be a JPEG, PNG, WebP or PDF file':
+            'Bukti pembayaran harus berupa berkas JPEG, PNG, WebP, atau PDF',
+        'No payment proof recorded for this order':
+            'Tidak ada bukti pembayaran yang tercatat untuk pesanan ini',
         'Discount cannot exceed the invoice subtotal':
             'Diskon tidak boleh melebihi subtotal invoice',
         'invalid unit': 'unit tidak valid',

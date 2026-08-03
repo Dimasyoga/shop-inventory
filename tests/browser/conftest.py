@@ -120,9 +120,11 @@ def shop(live_server, monkeypatch):
     monkeypatch.setattr(database, 'DB_PATH', db_file)
 
     conn = database.get_db()
-    # Children before parents: order_items references both orders and products.
-    for table in ('stock_logs', 'order_items', 'orders', 'restock_items',
-                  'restock_batches', 'self_use_items', 'self_use_batches', 'products'):
+    # Children before parents: order_items and order_payment_proofs both reference
+    # orders, and order_items references products as well.
+    for table in ('stock_logs', 'order_items', 'order_payment_proofs', 'orders',
+                  'restock_items', 'restock_batches', 'self_use_items',
+                  'self_use_batches', 'products'):
         conn.execute(f'DELETE FROM {table}')
     # Reset the counters too, so ids are predictable and a test can assert on "order #1".
     conn.execute("DELETE FROM sqlite_sequence")
@@ -198,6 +200,17 @@ class Shop:
         row = conn.execute("SELECT total_amount FROM orders WHERE id = ?", (order_id,)).fetchone()
         conn.close()
         return row['total_amount']
+
+    def payment_of(self, order_id):
+        """(buyer_name, payment_method, proof bytes or None) as actually stored."""
+        conn = self.connect()
+        row = conn.execute(
+            "SELECT o.buyer_name, o.payment_method, pp.data FROM orders o"
+            " LEFT JOIN order_payment_proofs pp ON pp.order_id = o.id"
+            " WHERE o.id = ?", (order_id,)).fetchone()
+        conn.close()
+        return (row['buyer_name'], row['payment_method'],
+                bytes(row['data']) if row['data'] is not None else None)
 
 
 @pytest.fixture

@@ -299,6 +299,15 @@ def screen_order_detail(db, order_id, t):
     order, items = services.get_order(db, order_id)
     status_label = t(STATUS_LABELS[order['status']]) if order['status'] in STATUS_LABELS else esc(order['status'])
     lines = [f"<b>{t('Order #{n}', n=order['id'])}</b> — {status_label}"]
+    # Only when there is something to say: a chat screen is narrow, and two lines
+    # reading "not recorded" on every order would push the items off it. The proof
+    # itself is not sent -- the bot would have to upload the file on every view, and
+    # the web UI is where a receipt gets looked at.
+    if order['buyer_name']:
+        lines.append(t('Buyer: {name}', name=esc(order['buyer_name'])))
+    if order['payment_method'] in services.PAYMENT_METHOD_LABELS:
+        lines.append(t('Paid by: {method}',
+                       method=t(services.PAYMENT_METHOD_LABELS[order['payment_method']])))
     for i in items:
         lines.append(f"• {esc(i['product_name'])} ×{i['quantity']} = {format_rupiah(i['subtotal'])}")
     lines.append(f"<b>{t('Total: {amount}', amount=format_rupiah(order['total_amount']))}</b>")

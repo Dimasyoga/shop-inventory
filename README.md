@@ -16,6 +16,8 @@ A Flask-based shop inventory management system built with Python 3.13, SQLite, a
 - User authentication (default: `admin` / `admin123`, hashed at rest; change it in Settings)
 - Product catalog with SKU, pricing, and stock tracking
 - Order management with lifecycle: draft → confirmed → completed (or cancelled)
+- Optional buyer name, payment method (cash / bank transfer) and proof of payment
+  per order — searchable by buyer, and exported with the month's sales (see below)
 - Invoice-based restock: a price per product plus batch discount, shipping and bank
   fee, allocated into a per-unit landed cost
 - Void a mistyped restock or self-use batch, reversing stock and money (see below)
@@ -176,8 +178,9 @@ The database is created automatically on first run. `database.py` handles:
 | `users` | Authentication (username, password) |
 | `products` | Product catalog (SKU, sale price, cost price, stock, stock held by open orders, threshold, cost-review flag) |
 | `stock_logs` | Stock movement audit trail (what moved, why, and who — `web:<user>` or `telegram:<id>`) |
-| `orders` | Order header (status, total) |
+| `orders` | Order header (status, total, optional buyer name and payment method) |
 | `order_items` | Order line items (price and cost snapshot per line) |
+| `order_payment_proofs` | Proof of payment for an order (receipt image or PDF, stored in the database so backups cover it) |
 | `restock_batches` | Restock batch header (invoice subtotal, discount, shipping, admin fee, total paid, void link) |
 | `restock_items` | Restock line items (product, qty, invoice unit price, landed unit cost, line cost, pre-batch cost snapshot) |
 | `self_use_batches` | Self-use batch header (total retail value per batch, void link) |
@@ -518,6 +521,32 @@ re-prices the order at today's prices, and adjusts what it holds — so lowering
 quantity or dropping a line puts those units straight back on sale. Once an order is
 confirmed the money has been taken and the lines are fixed; cancel and re-enter it if
 it is wrong.
+
+### Recording the Buyer and How They Paid
+
+Click 💳 on an order to record who it was for and how it was paid. All three
+fields are optional — fill in what you know:
+
+- **Buyer name** — free text. The Orders search box matches it as well as the order
+  number, which is the point: "which order was Bu Rina's" is asked by someone who
+  does not have the number.
+- **Payment method** — cash or bank transfer.
+- **Payment proof** — an invoice or a screenshot of a transfer receipt. JPEG, PNG,
+  WebP or PDF, up to 5 MB. A 📎 in the Buyer column means an order has one; open
+  the order with 👁️ to view it.
+
+Unlike the order's lines, these can be recorded or corrected at any point except on a
+cancelled order — including after the order is completed, because a transfer receipt
+often arrives after the sale. Recording them moves no stock and changes no money.
+
+Choosing a new file replaces the stored proof; **Remove it** is the only way to end up
+with none. Leaving the file box untouched keeps whatever is already there, so
+correcting a buyer's name never drops their receipt.
+
+The buyer and payment method appear in the monthly CSV export (one column each,
+repeated on every line of an order so a spreadsheet can filter on them), and the buyer
+appears in the monthly PDF's Sales Records table. The proof itself is not exported —
+it lives in the database, so `./backup.sh` covers it like everything else.
 
 ### Held Stock
 

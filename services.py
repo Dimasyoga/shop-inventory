@@ -227,17 +227,28 @@ def list_orders(db, status=None, search=None, page=0, page_size=10):
     fan a query out per row, so its cost grew with every order the shop had ever
     taken rather than with what it was showing.
 
-    ``search`` matches the order id as a substring, which is how the page's search
-    box has always behaved -- the shop looks up an order by the number on the note.
+    ``search`` matches the order id or the buyer's name as a substring. The id is
+    how the box has always behaved -- the shop looks up an order by the number on
+    the note -- and the buyer is what the name was recorded for: "which order was
+    Bu Rina's" is the question, and the id is exactly what the asker does not have.
     """
-    query = "SELECT * FROM orders WHERE 1=1"
+    # has_payment_proof rather than the proof itself: the list renders a paperclip,
+    # not the screenshot, and no page should carry megabytes it will not draw. The
+    # subquery is a rowid lookup on order_payment_proofs' primary key and runs at
+    # most page_size times, so it does not grow with the shop's order history.
+    query = ("SELECT o.*, EXISTS(SELECT 1 FROM order_payment_proofs pp"
+             " WHERE pp.order_id = o.id) AS has_payment_proof"
+             " FROM orders o WHERE 1=1")
     params = []
     if status:
         query += " AND status = ?"
         params.append(status)
     if search:
-        query += " AND id LIKE ?"
-        params.append(f'%{search}%')
+        # LIKE is case-insensitive for ASCII in SQLite, which is what buyer names
+        # here are; neither branch can use an index, but the filter runs over one
+        # page's worth of a walk that already stops at page_size.
+        query += " AND (id LIKE ? OR buyer_name LIKE ?)"
+        params += [f'%{search}%', f'%{search}%']
     # id breaks ties on created_at, which is only second-resolution: two orders taken
     # in the same second have no inherent order, and an unstable one lets a row shift
     # across the page boundary between requests and be shown twice or not at all.
@@ -262,8 +273,16 @@ def list_orders(db, status=None, search=None, page=0, page_size=10):
 
 
 def get_order(db, order_id):
-    """Return (order, items with product names)."""
-    order = db.execute("SELECT * FROM orders WHERE id = ?", (order_id,)).fetchone()
+    """Return (order, items with product names).
+
+    The order carries ``has_payment_proof`` but never the proof's bytes: the detail
+    view asks for those separately, through get_payment_proof, and only if it is
+    going to show them.
+    """
+    order = db.execute(
+        "SELECT o.*, EXISTS(SELECT 1 FROM order_payment_proofs pp"
+        " WHERE pp.order_id = o.id) AS has_payment_proof"
+        " FROM orders o WHERE o.id = ?", (order_id,)).fetchone()
     if not order:
         raise NotFoundError('Order not found')
     items = db.execute("""
@@ -383,6 +402,138 @@ def cancel_order(db, order_id):
     _release_order_holds(db, order_id)
     db.execute("UPDATE orders SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (order_id,))
     db.commit()
+
+
+# --- Buyer and payment ---
+#
+# All of this is optional: an order with no buyer and no method is a complete order,
+# exactly as it was before the columns existed. What it answers is "who was this
+# for, and how did they pay" -- a question the shop was asking of its own memory.
+
+# Stored slugs. The label a slug renders as is a t(...) call site (see
+# PAYMENT_METHOD_LABELS); the slug itself is never shown and never translated.
+PAYMENT_METHODS = ('cash', 'bank_transfer')
+
+PAYMENT_METHOD_LABELS = {
+    'cash': 'Cash',
+    'bank_transfer': 'Bank Transfer',
+}
+
+# Long enough for a name plus the note a shop actually writes ("Bu Rina - kantor"),
+# short enough that the column cannot be used as free storage.
+MAX_BUYER_NAME = 120
+
+# A phone screenshot is comfortably under this; a photo from a modern camera is not,
+# and neither is a video someone picked by mistake. app.py enforces the same ceiling
+# at the request level (MAX_CONTENT_LENGTH) so an oversized body is refused before it
+# is read into memory -- this is the check for callers that are not a web request.
+MAX_PROOF_BYTES = 5 * 1024 * 1024
+
+# Accepted proof types, keyed by what the bytes actually start with. The browser's
+# declared Content-Type is not consulted: it is chosen by the client, and the value
+# that matters is the one we later serve the file back as.
+#
+# Deliberately no SVG. It is an image to a seller and a scriptable document to a
+# browser, and this app serves proofs from its own origin.
+_PROOF_MAGIC = (
+    (b'\xff\xd8\xff', 'image/jpeg', 'jpg'),
+    (b'\x89PNG\r\n\x1a\n', 'image/png', 'png'),
+    (b'%PDF-', 'application/pdf', 'pdf'),
+)
+
+# Extension per accepted type, for the derived download name.
+PROOF_EXTENSIONS = {mime: ext for _, mime, ext in _PROOF_MAGIC} | {'image/webp': 'webp'}
+
+
+def sniff_proof_type(data):
+    """MIME type of ``data`` if it is an accepted proof, else None."""
+    for magic, mime, _ in _PROOF_MAGIC:
+        if data.startswith(magic):
+            return mime
+    # WebP is a RIFF container: the tag sits after a 4-byte length, so it cannot be
+    # matched by a prefix like the others. Phone screenshots arrive as WebP often
+    # enough that leaving it out would look like a broken upload.
+    if data[:4] == b'RIFF' and data[8:12] == b'WEBP':
+        return 'image/webp'
+    return None
+
+
+def payment_proof_filename(order_id, mime_type):
+    """Download name for a proof. Derived, never the uploader's own filename."""
+    return f'order-{order_id}-payment-proof.{PROOF_EXTENSIONS.get(mime_type, "bin")}'
+
+
+def set_order_payment(db, order_id, *, buyer_name=None, payment_method=None,
+                      proof=None, remove_proof=False):
+    """Record who an order was for and how it was paid.
+
+    ``buyer_name`` and ``payment_method`` are written as given -- passing None for
+    either clears it, because the editor submits every field it shows and a blanked
+    box has to mean blank. ``proof`` is the raw bytes of a receipt and is the one
+    exception: None leaves whatever is stored alone, since the editor cannot round-trip
+    a file back into its own input, and ``remove_proof`` is how it is actually removed.
+
+    Allowed in every status but cancelled. Not draft-only, unlike editing an order's
+    lines: a transfer receipt usually arrives after the sale is entered, sometimes
+    after it is completed, and a record that could not accept it then would be a
+    record of nothing. It also touches no money and no stock -- the lines stay
+    exactly as they were paid for.
+    """
+    order = db.execute("SELECT status FROM orders WHERE id = ?", (order_id,)).fetchone()
+    if not order:
+        raise NotFoundError('Order not found')
+    if order['status'] == 'cancelled':
+        raise ServiceError('Cannot record payment details on a cancelled order')
+
+    if isinstance(buyer_name, str):
+        buyer_name = buyer_name.strip()[:MAX_BUYER_NAME] or None
+    elif buyer_name is not None:
+        raise ServiceError('Buyer name must be text')
+    if payment_method is not None and payment_method not in PAYMENT_METHODS:
+        raise ServiceError('Unknown payment method')
+
+    mime_type = None
+    if proof is not None:
+        if not proof:
+            raise ServiceError('The payment proof file is empty')
+        if len(proof) > MAX_PROOF_BYTES:
+            raise ServiceError('Payment proof must be {n} MB or smaller',
+                               n=MAX_PROOF_BYTES // (1024 * 1024))
+        mime_type = sniff_proof_type(proof)
+        if not mime_type:
+            raise ServiceError('Payment proof must be a JPEG, PNG, WebP or PDF file')
+
+    try:
+        db.execute("UPDATE orders SET buyer_name = ?, payment_method = ?,"
+                   " updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                   (buyer_name, payment_method, order_id))
+        if proof is not None:
+            # Replaces any previous proof for this order: order_id is the primary key,
+            # so a corrected receipt overwrites the wrong one instead of leaving both
+            # with no way to say which is current.
+            db.execute("INSERT OR REPLACE INTO order_payment_proofs"
+                       " (order_id, mime_type, byte_size, data, uploaded_at)"
+                       " VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)",
+                       (order_id, mime_type, len(proof), proof))
+        elif remove_proof:
+            db.execute("DELETE FROM order_payment_proofs WHERE order_id = ?", (order_id,))
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+
+def get_payment_proof(db, order_id):
+    """The stored proof for an order, or None. Raises if the order does not exist.
+
+    Separate from get_order so that reading an order never carries the bytes: this
+    is the only query in the app that does, and only the download route runs it.
+    """
+    if not db.execute("SELECT 1 FROM orders WHERE id = ?", (order_id,)).fetchone():
+        raise NotFoundError('Order not found')
+    return db.execute(
+        "SELECT mime_type, byte_size, data, uploaded_at FROM order_payment_proofs"
+        " WHERE order_id = ?", (order_id,)).fetchone()
 
 
 # reserved_qty is a running total maintained by _hold_stock and _release_stock, but the
