@@ -32,6 +32,10 @@ TRANSLATIONS = {
         'Sales': 'Penjualan',
         'Settings': 'Pengaturan',
         'Logout': 'Keluar',
+        'Menu': 'Menu',
+        'Close menu': 'Tutup menu',
+        'Skip to content': 'Lewati ke konten',
+        'Remove item': 'Hapus baris',
 
         # --- Login ---
         'Login': 'Masuk',
@@ -343,6 +347,18 @@ TRANSLATIONS = {
         'This changes the language of the web interface and the Telegram bot.':
             'Ini mengubah bahasa antarmuka web dan bot Telegram.',
         'Language updated': 'Bahasa diperbarui',
+        # --- Text size ---
+        'Text size': 'Ukuran teks',
+        'Makes every word and button in the web app bigger. Takes effect straight '
+        'away, on this and any other device you sign in from.':
+            'Memperbesar semua tulisan dan tombol di aplikasi web. Langsung berlaku, '
+            'di perangkat ini dan perangkat lain tempat Anda masuk.',
+        'Normal': 'Normal',
+        'Large': 'Besar',
+        'Larger': 'Lebih besar',
+        'Largest': 'Paling besar',
+        'Text size saved': 'Ukuran teks tersimpan',
+        'Unsupported text size': 'Ukuran teks tidak didukung',
         'Telegram settings saved': 'Pengaturan Telegram tersimpan',
         'Testing…': 'Menguji…',
         'Connected as @{name}': 'Terhubung sebagai @{name}',

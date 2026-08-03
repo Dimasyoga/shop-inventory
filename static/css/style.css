@@ -1,321 +1,568 @@
+/* Every size that carries text is in rem, so the one number the shop owner picks in
+   Settings -- rendered as `font-size` on <html> by base.html -- scales the whole
+   interface. Borders, shadows and radii stay in px on purpose: they are trim, and
+   growing them with the text only makes the page look inflated rather than readable.
+   The scale multiplies the browser's own default, so a phone already set to large
+   text starts from there instead of overriding it. */
+:root {
+    /* Type scale. 1rem is the browser default (16px) times the shop's chosen scale. */
+    --fs-xs: 0.8125rem;
+    --fs-sm: 0.875rem;
+    --fs-base: 1rem;
+    --fs-md: 1.125rem;
+    --fs-lg: 1.375rem;
+    --fs-xl: 1.75rem;
+
+    /* Anything the finger has to hit. 2.75rem is the 44px touch target at the
+       default scale, and it grows with the text rather than staying put. */
+    --tap: 2.75rem;
+
+    /* Greys that pass WCAG AA on white. The old #999/#888 sat around 3:1, which is
+       thin for anybody and unreadable for the reader this interface is sized for. */
+    --text: #333;
+    --muted: #5c636a;
+    --faint: #6c757d;
+    --ink: #1a1a2e;
+    --accent: #4361ee;
+
+    --sidebar-w: 15rem;
+    --topbar-h: 3.5rem;
+}
+
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f0f2f5; color: #333; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #f0f2f5; color: var(--text);
+    font-size: var(--fs-base); line-height: 1.5;
+    /* iOS bumps text up by itself in landscape, which fights the chosen scale. */
+    -webkit-text-size-adjust: 100%;
+}
+
+/* Keyboard users should not have to tab the whole menu to reach the page. */
+.skip-link {
+    position: absolute; left: -9999px; top: 0; z-index: 400;
+    background: var(--accent); color: #fff; padding: 0.75rem 1rem;
+    border-radius: 0 0 6px 0; font-size: var(--fs-base);
+}
+.skip-link:focus { left: 0; }
+
+/* Visible focus everywhere. The default outline was being dropped by the :focus
+   rules below, which left a keyboard user with no idea where they were. */
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+/* Top bar -- phones only. It carries the menu button, so it is the only way to
+   navigate below the breakpoint and must never be hidden there. */
+.topbar { display: none; }
+.topbar-toggle {
+    width: var(--tap); height: var(--tap); min-width: var(--tap);
+    display: flex; align-items: center; justify-content: center;
+    background: none; border: none; color: #fff; font-size: var(--fs-lg);
+    cursor: pointer; border-radius: 6px;
+}
+.topbar-toggle:hover { background: rgba(255,255,255,0.12); }
+.topbar-title { font-size: var(--fs-md); font-weight: 600; }
+
+/* Scrim behind the open drawer. Tapping it closes the menu, which is the gesture
+   people try before they look for the ✕. */
+.nav-scrim {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.45); z-index: 150;
+}
+.nav-scrim.active { display: block; }
 
 /* Sidebar */
 .sidebar {
-    position: fixed; left: 0; top: 0; bottom: 0; width: 240px;
-    background: #1a1a2e; color: white; display: flex; flex-direction: column;
-    padding: 0; z-index: 100;
+    position: fixed; left: 0; top: 0; bottom: 0; width: var(--sidebar-w);
+    background: var(--ink); color: white; display: flex; flex-direction: column;
+    padding: 0; z-index: 200; overflow-y: auto;
 }
-.sidebar-header { padding: 24px 20px; border-bottom: 1px solid rgba(255,255,255,0.1); }
-.sidebar-header h1 { font-size: 18px; }
-.nav-links { list-style: none; padding: 16px 0; flex: 1; }
+.sidebar-header {
+    padding: 1.25rem; border-bottom: 1px solid rgba(255,255,255,0.1);
+    display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
+}
+.sidebar-header h1 { font-size: var(--fs-md); }
+.nav-close { display: none; }
+.nav-links { list-style: none; padding: 0.5rem 0; flex: 1; }
 .nav-links li a {
-    display: block; padding: 12px 20px; color: rgba(255,255,255,0.7);
-    text-decoration: none; font-size: 15px; transition: all 0.2s;
+    display: flex; align-items: center; gap: 0.75rem;
+    min-height: var(--tap); padding: 0.625rem 1.25rem;
+    color: rgba(255,255,255,0.85);
+    text-decoration: none; font-size: var(--fs-base); transition: background 0.2s;
 }
 .nav-links li a:hover { background: rgba(255,255,255,0.1); color: white; }
-.nav-links li a.active { background: #4361ee; color: white; }
+.nav-links li a.active { background: var(--accent); color: white; }
+.nav-icon { font-size: var(--fs-md); line-height: 1; }
 .sidebar-footer {
-    padding: 16px 20px; border-top: 1px solid rgba(255,255,255,0.1);
-    display: flex; justify-content: space-between; align-items: center;
-    font-size: 14px;
+    padding: 0.75rem 1.25rem; border-top: 1px solid rgba(255,255,255,0.1);
+    display: flex; justify-content: space-between; align-items: center; gap: 0.75rem;
+    font-size: var(--fs-sm); flex-wrap: wrap;
 }
-.sidebar-footer a { color: rgba(255,255,255,0.7); text-decoration: none; }
-.sidebar-footer a:hover { color: white; }
+.sidebar-footer a {
+    color: rgba(255,255,255,0.85); text-decoration: none;
+    min-height: var(--tap); display: flex; align-items: center;
+}
+.sidebar-footer a:hover { color: white; text-decoration: underline; }
 
 /* Content */
-.content { margin-left: 240px; padding: 24px; min-height: 100vh; }
+.content { margin-left: var(--sidebar-w); padding: 1.5rem; min-height: 100vh; }
 
 /* Page Header */
 .page-header {
     display: flex; justify-content: space-between; align-items: center;
-    margin-bottom: 24px;
+    gap: 0.75rem; flex-wrap: wrap; margin-bottom: 1.5rem;
 }
-.page-header h2 { font-size: 24px; color: #1a1a2e; }
+.page-header h2 { font-size: var(--fs-lg); color: var(--ink); }
 
-/* Stats Grid */
-.stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
-.stats-grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
+/* Stats Grid.
+   minmax(0, 1fr) rather than 1fr: a plain 1fr track will not shrink below its
+   content, so one long figure -- "Rp 4.200.000" at the stat size -- widens its
+   column, and the row then pushes the whole page wider than the screen. */
+.stats-grid {
+    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 1rem; margin-bottom: 1.5rem;
+}
+.stats-grid.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .stat-card {
-    background: white; border-radius: 10px; padding: 20px;
-    display: flex; align-items: center; gap: 16px;
+    background: white; border-radius: 10px; padding: 1.25rem;
+    display: flex; align-items: center; gap: 1rem;
     box-shadow: 0 1px 3px rgba(0,0,0,0.08);
 }
-.stat-icon { font-size: 32px; }
-.stat-value { font-size: 28px; font-weight: 700; color: #1a1a2e; }
-.stat-label { font-size: 13px; color: #666; margin-top: 2px; }
+.stat-icon { font-size: var(--fs-xl); flex: none; }
+.stat-value { font-size: var(--fs-xl); font-weight: 700; color: var(--ink); }
+.stat-label { font-size: var(--fs-sm); color: var(--muted); margin-top: 2px; }
+/* The text beside the icon is what has to give when the card is narrow. */
+.stat-info { min-width: 0; }
 
 /* Grid */
-.grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+.grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
 
 /* Card */
 .card {
-    background: white; border-radius: 10px; padding: 20px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-bottom: 16px;
+    background: white; border-radius: 10px; padding: 1.25rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-bottom: 1rem;
 }
-.card h3 { margin-bottom: 16px; font-size: 16px; color: #1a1a2e; }
+.card h3 { margin-bottom: 1rem; font-size: var(--fs-md); color: var(--ink); }
 
 /* Table */
 .data-table { width: 100%; border-collapse: collapse; }
 .data-table th {
-    text-align: left; padding: 10px 12px; font-size: 13px;
-    color: #666; font-weight: 600; border-bottom: 2px solid #eee;
-    text-transform: uppercase; letter-spacing: 0.5px;
+    text-align: left; padding: 0.75rem; font-size: var(--fs-sm);
+    color: var(--muted); font-weight: 700; border-bottom: 2px solid #eee;
+    text-transform: uppercase; letter-spacing: 0.3px;
 }
 .data-table td {
-    padding: 10px 12px; border-bottom: 1px solid #f0f0f0; font-size: 14px;
+    padding: 0.75rem; border-bottom: 1px solid #f0f0f0; font-size: var(--fs-base);
 }
 .data-table tr:hover { background: #f8f9ff; }
-.empty-row { text-align: center; color: #999; padding: 24px !important; }
-.action-cell { display: flex; gap: 4px; }
+.empty-row { text-align: center; color: var(--faint); padding: 1.5rem !important; }
+.action-cell { display: flex; gap: 0.25rem; flex-wrap: wrap; }
 
 /* Table Controls */
-.table-controls { display: flex; gap: 12px; margin-bottom: 16px; }
+.table-controls { display: flex; gap: 0.75rem; margin-bottom: 1rem; flex-wrap: wrap; }
 .search-input {
-    padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px;
-    font-size: 14px; width: 240px;
+    padding: 0.625rem 0.75rem; border: 1px solid #ddd; border-radius: 6px;
+    font-size: var(--fs-base); width: 15rem; min-height: var(--tap);
 }
-.search-input:focus, select:focus { outline: none; border-color: #4361ee; }
-select { padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; }
+.search-input:focus, select:focus { border-color: var(--accent); }
+select {
+    padding: 0.625rem 0.75rem; border: 1px solid #ddd; border-radius: 6px;
+    font-size: var(--fs-base); min-height: var(--tap); background: #fff;
+}
 .filter-chip {
-    padding: 8px 14px; border: 1px solid #f39c12; border-radius: 999px;
-    background: #fff; color: #b9770e; font-size: 14px; cursor: pointer;
-    transition: all 0.2s; white-space: nowrap;
+    padding: 0.5rem 0.875rem; border: 1px solid #f39c12; border-radius: 999px;
+    background: #fff; color: #96600b; font-size: var(--fs-base); cursor: pointer;
+    transition: all 0.2s; white-space: nowrap; min-height: var(--tap);
 }
 .filter-chip:hover { background: #fdf3e3; }
-.filter-chip.active { background: #f39c12; color: #fff; }
+.filter-chip.active { background: #b9770e; color: #fff; border-color: #b9770e; }
 /* Archived is a place to look, not a problem to fix -- no warning colour. */
 .filter-chip.chip-neutral { border-color: #ced4da; color: #555; }
 .filter-chip.chip-neutral:hover { background: #f1f3f5; }
-.filter-chip.chip-neutral.active { background: #6c757d; color: #fff; border-color: #6c757d; }
-.row-archived { color: #999; }
+.filter-chip.chip-neutral.active { background: #5c636a; color: #fff; border-color: #5c636a; }
+.row-archived { color: var(--faint); }
 
 /* Cost that cannot be trusted, in the two ways it happens: never recorded, or left in
    doubt by a voided restock. Different marks, because "—" and a wrong number are
    different problems for the shop owner. */
-.cost-unknown { color: #999; }
-.cost-suspect { color: #b9770e; font-weight: 600; cursor: help; }
-.stock-held { color: #999; font-size: 12px; white-space: nowrap; }
-.pager { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 16px; }
+.cost-unknown { color: var(--faint); }
+.cost-suspect { color: #96600b; font-weight: 700; cursor: help; }
+.stock-held { color: var(--faint); font-size: var(--fs-xs); white-space: nowrap; }
+.pager {
+    display: flex; align-items: center; justify-content: center;
+    gap: 0.75rem; margin-top: 1rem; flex-wrap: wrap;
+}
 .pager:empty { display: none; }
 .pager button[disabled] { opacity: .45; cursor: default; }
-.pager-label { color: #666; font-size: 14px; }
+.pager-label { color: var(--muted); font-size: var(--fs-base); }
 
 /* Stock in and out on the history page. Colour is a second cue, not the only one --
    the sign is always printed, so a red/green blind reader loses nothing. */
-.qty-in { color: #1e8449; font-weight: 600; white-space: nowrap; }
-.qty-out { color: #b03a2e; font-weight: 600; white-space: nowrap; }
+.qty-in { color: #1a7a42; font-weight: 700; white-space: nowrap; }
+.qty-out { color: #b03a2e; font-weight: 700; white-space: nowrap; }
 
 /* A voided batch and the void reversing it both still count as history -- muted rather
    than hidden, because the audit trail is the point of keeping them. */
-.batch-void { color: #999; font-style: italic; }
+.batch-void { color: var(--faint); font-style: italic; }
 
 /* Buttons */
 .btn {
-    padding: 8px 16px; border: none; border-radius: 6px;
-    font-size: 14px; cursor: pointer; transition: all 0.2s;
+    padding: 0.625rem 1rem; border: none; border-radius: 6px;
+    font-size: var(--fs-base); cursor: pointer; transition: background 0.2s;
+    min-height: var(--tap); background: #e9ecef; color: var(--text);
 }
-.btn-primary { background: #4361ee; color: white; }
+.btn-primary { background: var(--accent); color: white; }
 .btn-primary:hover { background: #3a56d4; }
-.btn-secondary { background: #e9ecef; color: #333; }
+.btn-secondary { background: #e9ecef; color: var(--text); }
 .btn-secondary:hover { background: #dee2e6; }
-.btn-success { background: #2ecc71; color: white; }
-.btn-success:hover { background: #27ae60; }
-.btn-warning { background: #f39c12; color: white; }
-.btn-warning:hover { background: #e67e22; }
-.btn-danger { background: #e74c3c; color: white; }
-.btn-danger:hover { background: #c0392b; }
+.btn-success { background: #1e8449; color: white; }
+.btn-success:hover { background: #196c3b; }
+.btn-warning { background: #b9770e; color: white; }
+.btn-warning:hover { background: #9c630b; }
+.btn-danger { background: #c0392b; color: white; }
+.btn-danger:hover { background: #a53125; }
 .btn-icon {
-    background: none; border: none; cursor: pointer; font-size: 16px;
-    padding: 4px 8px; border-radius: 4px;
+    background: none; border: none; cursor: pointer; font-size: var(--fs-md);
+    min-width: var(--tap); min-height: var(--tap); border-radius: 6px;
+    display: inline-flex; align-items: center; justify-content: center;
 }
-.btn-icon:hover { background: #f0f0f0; }
+.btn-icon:hover { background: #e9ecef; }
 
 /* Badge */
 .badge {
-    display: inline-block; padding: 2px 10px; border-radius: 12px;
-    font-size: 12px; font-weight: 600; text-transform: capitalize;
+    display: inline-block; padding: 0.25rem 0.625rem; border-radius: 999px;
+    font-size: var(--fs-sm); font-weight: 700; text-transform: capitalize;
 }
-.badge-draft { background: #e9ecef; color: #555; }
-.badge-confirmed { background: #fef3c7; color: #d97706; }
-.badge-completed { background: #d1fae5; color: #059669; }
-.badge-cancelled { background: #fee2e2; color: #dc2626; }
+.badge-draft { background: #e9ecef; color: #444; }
+.badge-confirmed { background: #fef3c7; color: #92600a; }
+.badge-completed { background: #d1fae5; color: #04724d; }
+.badge-cancelled { background: #fee2e2; color: #b91c1c; }
 
 /* Modal */
 .modal {
     display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-    background: rgba(0,0,0,0.5); z-index: 200;
-    justify-content: center; align-items: center;
+    background: rgba(0,0,0,0.5); z-index: 250;
+    justify-content: center; align-items: center; padding: 1rem;
 }
 .modal.active { display: flex; }
 .modal-content {
-    background: white; border-radius: 12px; padding: 24px;
-    width: 500px; max-height: 90vh; overflow-y: auto;
+    background: white; border-radius: 12px; padding: 1.5rem;
+    /* Was a flat 500px, which ran off the side of every phone. */
+    width: 100%; max-width: 31.25rem; max-height: 90vh; overflow-y: auto;
     box-shadow: 0 8px 32px rgba(0,0,0,0.2);
 }
 .modal-header {
     display: flex; justify-content: space-between; align-items: center;
-    margin-bottom: 20px; padding-bottom: 12px; border-bottom: 1px solid #eee;
+    gap: 0.75rem; margin-bottom: 1.25rem;
+    padding-bottom: 0.75rem; border-bottom: 1px solid #eee;
 }
-.modal-header h3 { font-size: 18px; color: #1a1a2e; }
+.modal-header h3 { font-size: var(--fs-md); color: var(--ink); }
 .modal-close {
-    font-size: 24px; cursor: pointer; color: #999;
+    font-size: var(--fs-lg); cursor: pointer; color: var(--muted);
     background: none; border: none; line-height: 1;
+    min-width: var(--tap); min-height: var(--tap);
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: 6px;
 }
-.modal-close:hover { color: #333; }
-.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.modal-close:hover { color: var(--text); background: #f0f0f0; }
+.modal-actions {
+    display: flex; justify-content: flex-end; gap: 0.5rem;
+    margin-top: 1rem; flex-wrap: wrap;
+}
 
 /* Form */
-.form-group { margin-bottom: 12px; }
-.form-group label { display: block; margin-bottom: 4px; font-weight: 600; font-size: 13px; color: #555; }
+.form-group { margin-bottom: 0.875rem; }
+.form-group label {
+    display: block; margin-bottom: 0.25rem;
+    font-weight: 600; font-size: var(--fs-sm); color: #4a4a4a;
+}
+/* A checkbox label wraps its input, so it must sit on one line and stay tappable. */
+.form-group label:has(> input[type="checkbox"]) {
+    display: flex; align-items: center; gap: 0.5rem;
+    min-height: var(--tap); font-size: var(--fs-base);
+}
+.form-group input[type="checkbox"] { width: 1.25rem; height: 1.25rem; flex: none; }
 .form-group input, .form-group select, .form-group textarea {
-    width: 100%; padding: 8px 12px; border: 1px solid #ddd;
-    border-radius: 6px; font-size: 14px;
+    width: 100%; padding: 0.625rem 0.75rem; border: 1px solid #ddd;
+    border-radius: 6px;
+    /* Never below 1rem: Safari zooms the whole page when a field under 16px is
+       focused, and the shop owner then has to pinch back out to see the form. */
+    font-size: var(--fs-base); min-height: var(--tap);
 }
 .form-group input:focus, .form-group select:focus {
-    outline: none; border-color: #4361ee; box-shadow: 0 0 0 2px rgba(67,97,238,0.15);
+    border-color: var(--accent); box-shadow: 0 0 0 2px rgba(67,97,238,0.15);
 }
-.form-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.form-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; }
+
+/* Per-control label on a restock / self-use line. The header row above the lines
+   labels them for anyone who can see the grid; a screen reader gets nothing from
+   that, so the real label is always in the DOM and merely taken out of the flow. It
+   comes back when the header row is dropped on a narrow screen. */
+.row-label {
+    position: absolute; width: 1px; height: 1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+}
 
 /* Toast */
 .toast {
-    position: fixed; top: 20px; right: 20px; padding: 12px 20px;
-    border-radius: 8px; color: white; font-size: 14px; z-index: 300;
+    position: fixed; top: 1rem; right: 1rem; left: 1rem; max-width: 26rem;
+    margin-left: auto; padding: 0.875rem 1.25rem;
+    border-radius: 8px; color: white; font-size: var(--fs-base); z-index: 300;
     box-shadow: 0 4px 12px rgba(0,0,0,0.15); opacity: 0;
     transition: opacity 0.3s;
 }
 .toast.show { opacity: 1; }
-.toast-success { background: #2ecc71; }
-.toast-error { background: #e74c3c; }
+.toast-success { background: #1e8449; }
+.toast-error { background: #c0392b; }
 
 /* Period Selector */
 .period-selector {
-    display: flex; gap: 8px; margin-bottom: 24px; flex-wrap: wrap;
+    display: flex; gap: 0.5rem; margin-bottom: 1.5rem; flex-wrap: wrap;
 }
 .btn-period {
-    padding: 8px 16px; border: 1px solid #ddd; border-radius: 6px;
-    background: white; color: #555; font-size: 14px; cursor: pointer;
-    transition: all 0.2s;
+    padding: 0.5rem 1rem; border: 1px solid #ddd; border-radius: 6px;
+    background: white; color: #4a4a4a; font-size: var(--fs-base); cursor: pointer;
+    transition: all 0.2s; min-height: var(--tap);
 }
-.btn-period:hover { border-color: #4361ee; color: #4361ee; }
-.btn-period.active { background: #4361ee; color: white; border-color: #4361ee; }
+.btn-period:hover { border-color: var(--accent); color: var(--accent); }
+.btn-period.active { background: var(--accent); color: white; border-color: var(--accent); }
 
 /* Time Navigator */
 .time-navigator {
-    display: flex; align-items: center; gap: 16px; margin-bottom: 24px; flex-wrap: wrap;
+    display: flex; align-items: center; gap: 1rem;
+    margin-bottom: 1.5rem; flex-wrap: wrap;
 }
-.time-unit-selector {
-    display: flex; gap: 6px;
-}
+.time-unit-selector { display: flex; gap: 0.375rem; flex-wrap: wrap; }
 .btn-unit {
-    padding: 8px 16px; border: 1px solid #ddd; border-radius: 6px;
-    background: white; color: #555; font-size: 14px; cursor: pointer;
-    transition: all 0.2s;
+    padding: 0.5rem 1rem; border: 1px solid #ddd; border-radius: 6px;
+    background: white; color: #4a4a4a; font-size: var(--fs-base); cursor: pointer;
+    transition: all 0.2s; min-height: var(--tap);
 }
-.btn-unit:hover { border-color: #4361ee; color: #4361ee; }
-.btn-unit.active { background: #4361ee; color: white; border-color: #4361ee; }
+.btn-unit:hover { border-color: var(--accent); color: var(--accent); }
+.btn-unit.active { background: var(--accent); color: white; border-color: var(--accent); }
 
-.time-controls {
-    display: flex; align-items: center; gap: 8px;
-}
+.time-controls { display: flex; align-items: center; gap: 0.5rem; }
 .btn-nav {
-    width: 32px; height: 32px; border: 1px solid #ddd; border-radius: 6px;
-    background: white; color: #555; font-size: 14px; cursor: pointer;
-    display: flex; align-items: center; justify-content: center;
+    width: var(--tap); height: var(--tap); border: 1px solid #ddd; border-radius: 6px;
+    background: white; color: #4a4a4a; font-size: var(--fs-base); cursor: pointer;
+    display: flex; align-items: center; justify-content: center; flex: none;
     transition: all 0.2s;
 }
-.btn-nav:hover { border-color: #4361ee; color: #4361ee; }
+.btn-nav:hover { border-color: var(--accent); color: var(--accent); }
 .time-label {
-    font-size: 14px; color: #333; min-width: 160px; text-align: center;
-    font-weight: 500;
+    font-size: var(--fs-base); color: var(--text); min-width: 10rem;
+    text-align: center; font-weight: 600;
 }
 .btn-reset {
-    padding: 6px 14px; border: 1px solid #ddd; border-radius: 6px;
-    background: white; color: #888; font-size: 13px; cursor: pointer;
-    transition: all 0.2s;
+    padding: 0.5rem 0.875rem; border: 1px solid #ddd; border-radius: 6px;
+    background: white; color: var(--muted); font-size: var(--fs-sm); cursor: pointer;
+    transition: all 0.2s; min-height: var(--tap);
 }
-.btn-reset:hover { border-color: #4361ee; color: #4361ee; }
+.btn-reset:hover { border-color: var(--accent); color: var(--accent); }
 
 /* Chart Container */
-.chart-container {
-    position: relative; height: 300px; width: 100%;
-}
+.chart-container { position: relative; height: 18.75rem; width: 100%; }
 
 /* Field Warning */
 .field-warning {
-    display: block; margin-top: 4px; font-size: 12px; color: #d97706;
+    display: block; margin-top: 0.25rem; font-size: var(--fs-sm); color: #96600b;
 }
 
 /* Restock / Self Use Header Row */
 .restock-header-row, .self-use-header-row {
     display: grid; grid-template-columns: 2fr 1fr auto;
-    gap: 8px; margin-bottom: 4px;
+    gap: 0.5rem; margin-bottom: 0.25rem;
 }
 .restock-header-row label, .self-use-header-row label {
-    font-size: 12px; font-weight: 700; color: #555;
-    text-transform: uppercase; letter-spacing: 0.5px;
+    font-size: var(--fs-sm); font-weight: 700; color: #4a4a4a;
+    text-transform: uppercase; letter-spacing: 0.3px;
 }
 
 /* Restock / Self Use Item Row */
 .restock-item-row, .self-use-item-row {
     display: grid; grid-template-columns: 2fr 1fr auto;
-    gap: 8px; margin-bottom: 8px; align-items: end;
+    gap: 0.5rem; margin-bottom: 0.5rem; align-items: end;
 }
 /* Restock carries a unit price per line -- the invoice column that makes margin
    computable -- so it is one column wider than self use. */
 .restock-header-row, .restock-item-row { grid-template-columns: 2fr 1fr 1fr auto; }
 .restock-item-row select, .restock-item-row input,
 .self-use-item-row select, .self-use-item-row input {
-    padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px;
+    padding: 0.625rem 0.75rem; border: 1px solid #ddd; border-radius: 6px;
+    font-size: var(--fs-base); min-height: var(--tap); width: 100%;
 }
 .restock-item-row select:focus, .restock-item-row input:focus,
 .self-use-item-row select:focus, .self-use-item-row input:focus {
-    outline: none; border-color: #4361ee;
+    border-color: var(--accent);
 }
 .btn-remove-item {
-    background: #e74c3c; color: white; border: none; border-radius: 6px;
-    padding: 8px 12px; cursor: pointer; font-size: 16px;
+    background: #c0392b; color: white; border: none; border-radius: 6px;
+    min-width: var(--tap); min-height: var(--tap); cursor: pointer;
+    font-size: var(--fs-md);
 }
 
 /* Restock invoice charges + running total */
-.restock-charges { display: flex; flex-wrap: wrap; gap: 16px; margin: 12px 0 4px; }
+.restock-charges { display: flex; flex-wrap: wrap; gap: 1rem; margin: 0.75rem 0 0.25rem; }
 .restock-totals {
-    margin: 8px 0 16px; font-size: 13px; color: #555; line-height: 1.7;
+    margin: 0.5rem 0 1rem; font-size: var(--fs-base); color: #4a4a4a; line-height: 1.7;
 }
 .restock-totals .restock-total-paid { font-weight: 700; color: #222; }
-.form-hint { font-size: 13px; color: #666; margin-bottom: 12px; }
-.table-note { font-size: 12px; color: #888; margin-top: 8px; }
+.form-hint { font-size: var(--fs-sm); color: var(--muted); margin-bottom: 0.75rem; }
+.table-note { font-size: var(--fs-sm); color: var(--muted); margin-top: 0.5rem; }
 
 /* Restock / Self Use Batch Row (expandable) */
 .restock-batch-row, .self-use-batch-row { cursor: pointer; }
 .restock-batch-row:hover, .self-use-batch-row:hover { background: #e8edff !important; }
 .restock-detail-row td, .self-use-detail-row td { border-bottom: none !important; }
 
-/* Responsive */
-@media (max-width: 768px) {
-    .sidebar { width: 60px; }
-    .sidebar-header h1, .sidebar-footer span, .nav-links li a span { display: none; }
-    .nav-links li a { text-align: center; padding: 12px; font-size: 20px; }
-    .content { margin-left: 60px; }
-    .stats-grid { grid-template-columns: repeat(2, 1fr); }
-    .stats-grid.cols-3 { grid-template-columns: repeat(2, 1fr); }
-    .grid-2 { grid-template-columns: 1fr; }
-    .form-row { grid-template-columns: 1fr; }
-    .period-selector { flex-wrap: wrap; }
-    .time-navigator { flex-direction: column; align-items: flex-start; }
-    .time-controls { width: 100%; justify-content: space-between; }
-    .chart-container { height: 220px; }
-}
-
 /* Settings page */
-.help-text { font-size: 13px; color: #777; margin-bottom: 12px; }
-.help-text a { color: #4361ee; }
-.form-actions { display: flex; gap: 8px; margin-top: 16px; }
+.help-text { font-size: var(--fs-sm); color: var(--muted); margin-bottom: 0.75rem; }
+.help-text a { color: var(--accent); }
+.form-actions { display: flex; gap: 0.5rem; margin-top: 1rem; flex-wrap: wrap; }
+
+/* Text size chooser. Each option is rendered at the size it sets, so the choice is
+   made by looking rather than by reading "115%" and guessing what that means. */
+.text-size-options {
+    display: flex; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 1rem;
+}
+.text-size-option {
+    flex: 1 1 8rem; padding: 1rem 0.75rem; border: 2px solid #ddd; border-radius: 10px;
+    background: #fff; color: var(--text); cursor: pointer; text-align: center;
+    display: flex; flex-direction: column; align-items: center; gap: 0.375rem;
+    min-height: var(--tap); transition: all 0.2s;
+}
+.text-size-option:hover { border-color: var(--accent); }
+.text-size-option.active { border-color: var(--accent); background: #eef1fe; }
+.text-size-sample { font-weight: 700; line-height: 1.2; }
+.text-size-name { font-size: var(--fs-sm); color: var(--muted); }
+.text-size-option.active .text-size-name { color: var(--accent); font-weight: 600; }
 
 /* Monthly report (sales page) */
-.report-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.report-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
 .report-actions select {
-    padding: 8px 10px; border: 1px solid #ddd; border-radius: 6px;
-    font-size: 14px; min-width: 160px;
+    padding: 0.5rem 0.625rem; border: 1px solid #ddd; border-radius: 6px;
+    font-size: var(--fs-base); min-width: 10rem;
+}
+
+/* ===== Responsive =====
+   Below this width the sidebar becomes a drawer behind the ☰ button and every table
+   stops being a table. The breakpoint stays in px on purpose: it describes the glass,
+   which does not change when the text scale does. */
+@media (max-width: 768px) {
+    .topbar {
+        display: flex; align-items: center; gap: 0.5rem;
+        position: fixed; top: 0; left: 0; right: 0; height: var(--topbar-h);
+        background: var(--ink); color: #fff; padding: 0 0.75rem; z-index: 140;
+    }
+    .content { margin-left: 0; padding: 1rem; padding-top: calc(var(--topbar-h) + 1rem); }
+
+    /* Off-canvas until the button opens it. Full labels, full-height rows -- an
+       icon-only rail asks the reader to remember what 🧾 meant. */
+    .sidebar {
+        width: min(20rem, 85vw); max-width: 100%;
+        transform: translateX(-100%); transition: transform 0.25s ease;
+    }
+    .sidebar.open { transform: translateX(0); }
+    .nav-close {
+        display: flex; align-items: center; justify-content: center;
+        width: var(--tap); height: var(--tap); flex: none;
+        background: none; border: none; color: #fff; font-size: var(--fs-lg);
+        cursor: pointer; border-radius: 6px;
+    }
+    .nav-close:hover { background: rgba(255,255,255,0.12); }
+    .nav-links { padding: 0.5rem 0; }
+    .nav-links li a { padding: 0.875rem 1.25rem; font-size: var(--fs-md); }
+
+    /* One card per row, not two. A rupiah figure runs to "Rp 4.200.000", and half a
+       phone is not enough for that at a size worth reading -- squeezed into two
+       columns it either wrapped mid-number or pushed the page sideways. Seven full
+       width cards make a longer page, which costs a scroll; the alternative costs
+       legibility, and legibility is the point of this screen. */
+    .stats-grid, .stats-grid.cols-3 { grid-template-columns: 1fr; }
+    .stat-label { white-space: normal; }
+    .grid-2 { grid-template-columns: 1fr; }
+    .form-row { grid-template-columns: 1fr; }
+    .time-navigator { flex-direction: column; align-items: stretch; }
+    .time-controls { width: 100%; justify-content: space-between; }
+    .time-label { min-width: 0; flex: 1; }
+    .chart-container { height: 15rem; }
+    .search-input { width: 100%; }
+    .table-controls { flex-direction: column; align-items: stretch; }
+
+    /* Seven columns do not fit a phone at any font size, and shrinking them to make
+       them fit defeats the point. Each row becomes a labelled block instead; the
+       labels come from the table's own <thead> at render time (labelTableCells in
+       app.js), so they stay translated and no render site has to repeat them. */
+    .data-table thead { display: none; }
+    .data-table, .data-table tbody, .data-table tr, .data-table td { display: block; width: 100%; }
+    .data-table tr {
+        border: 1px solid #e6e6e6; border-radius: 10px;
+        margin-bottom: 0.75rem; padding: 0.25rem 0.75rem; background: #fff;
+    }
+    .data-table td {
+        display: flex; justify-content: space-between; align-items: baseline;
+        /* Wrapping so the value drops to its own line when the label leaves it too
+           little room. Without it a large text scale breaks inside the value instead,
+           and "Rp 18.000" is read as two lines of nonsense. */
+        gap: 0.75rem 1rem; flex-wrap: wrap;
+        padding: 0.625rem 0; border-bottom: 1px solid #f2f2f2;
+        text-align: right;
+    }
+    .data-table tr td:last-child { border-bottom: none; }
+    .data-table td[data-label]::before {
+        content: attr(data-label);
+        font-size: var(--fs-sm); font-weight: 700; color: var(--muted);
+        text-transform: uppercase; letter-spacing: 0.3px;
+        text-align: left; flex: 0 0 auto; margin-right: auto;
+    }
+    /* A cell with no label of its own is either the empty-row notice or an expanded
+       batch detail: both are already full-width prose. */
+    .data-table td[colspan] { display: block; text-align: left; }
+    /* An icon-only button says what it does through a hover tooltip, and a phone has
+       no hover -- so a row of orders offered five unlabelled emoji and no way to find
+       out what any of them meant. The label is already on the button, translated, as
+       the title it was showing on a desktop; it is simply drawn beside the icon here
+       rather than waiting for a pointer that never arrives. */
+    .action-cell { justify-content: flex-start; flex-wrap: wrap; gap: 0.5rem; }
+    .action-cell .btn-icon {
+        min-width: 0; padding: 0 0.75rem; gap: 0.375rem; background: #f1f3f5;
+    }
+    .btn-icon[title]::after {
+        content: attr(title);
+        font-size: var(--fs-sm); font-weight: 600; color: var(--text);
+    }
+    .restock-detail-row td, .self-use-detail-row td { border-bottom: none !important; }
+
+    .restock-header-row, .self-use-header-row { display: none; }
+    /* Stacked, and each control labelled by its placeholder -- a bare number box
+       under a hidden header row is unanswerable. */
+    .restock-item-row, .self-use-item-row {
+        grid-template-columns: 1fr; align-items: stretch;
+        border: 1px solid #e6e6e6; border-radius: 10px;
+        padding: 0.75rem; margin-bottom: 0.75rem; background: #fff;
+    }
+    .row-label {
+        position: static; width: auto; height: auto; clip: auto;
+        display: block; margin-bottom: 0.25rem;
+        font-size: var(--fs-sm); font-weight: 600; color: #4a4a4a;
+    }
+    /* Stacked, this was a full-width red bar carrying a bare ×: the loudest thing on
+       the form, and the one control that did not say what it did. It gets its label
+       and stops spanning the row. */
+    .btn-remove-item {
+        width: auto; padding: 0 0.875rem;
+        display: inline-flex; align-items: center; gap: 0.375rem;
+    }
+    .btn-remove-item::after {
+        content: attr(aria-label); font-size: var(--fs-sm); font-weight: 600;
+    }
+
+    .modal { padding: 0.5rem; align-items: flex-start; }
+    .modal-content { padding: 1rem; max-height: 95vh; margin-top: 0.5rem; }
+    .page-header .btn, .form-actions .btn, .modal-actions .btn { flex: 1 1 auto; }
+    .toast { top: auto; bottom: 1rem; }
+}
+
+/* Someone who asked the system for less motion should not get a sliding drawer. */
+@media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
 }

@@ -45,6 +45,40 @@ function escapeHtml(s) {
     }[c]));
 }
 
+/* ===== Narrow-screen table labels =====
+   Below 768px the stylesheet drops the <thead> and lays each row out as a labelled
+   block, drawing the label from `data-label`. The labels are copied off the table's
+   own header here instead of being written at each of the fifteen places that build
+   a row: they would otherwise have to be repeated -- in both languages -- and the
+   next render site added would be the one that forgot. Cells with a colspan are the
+   empty-row notice and the expanded batch details, which are full-width prose and
+   need no label. */
+function labelTableCells(table) {
+    const heads = Array.from(table.querySelectorAll('thead th'), th => th.textContent.trim());
+    if (!heads.length) return;
+    table.querySelectorAll('tbody tr').forEach(tr => {
+        Array.from(tr.children).forEach((td, i) => {
+            if (td.hasAttribute('colspan') || !heads[i]) return;
+            td.setAttribute('data-label', heads[i]);
+        });
+    });
+}
+
+/* Rows are drawn by innerHTML long after load, so labelling once at startup would
+   only ever catch the server-rendered tables. Watching each tbody for added rows
+   covers every render without the render functions knowing about any of this.
+   childList on the tbody alone -- setting an attribute on a cell is not a mutation
+   it observes, so this cannot feed itself. */
+function watchTableLabels(root = document) {
+    root.querySelectorAll('table.data-table').forEach(table => {
+        const body = table.querySelector('tbody');
+        if (!body || body.dataset.labelled) return;
+        body.dataset.labelled = '1';
+        labelTableCells(table);
+        new MutationObserver(() => labelTableCells(table)).observe(body, { childList: true });
+    });
+}
+
 /* Resolves only on a 2xx; anything else **throws** with the server's translated error
    text. So every caller needs a .catch to say so -- `.then(d => d.success ? ... : ...)`
    is a trap, because the failure branch is unreachable and the rejection goes nowhere.
@@ -93,7 +127,52 @@ function fetchJson(url) {
     });
 }
 
+/* ===== Navigation drawer =====
+   Below 768px the sidebar is off-canvas and these open it. Above it the drawer rules
+   do not apply, the sidebar is always visible, and the ☰ button is display:none, so
+   these are only ever reached on a phone. */
+function setNav(open) {
+    const nav = document.getElementById('mainNav');
+    const scrim = document.getElementById('navScrim');
+    const toggle = document.getElementById('navToggle');
+    if (!nav) return;
+    nav.classList.toggle('open', open);
+    if (scrim) scrim.classList.toggle('active', open);
+    if (toggle) toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    /* The page behind the drawer must not scroll under the finger. */
+    document.body.style.overflow = open ? 'hidden' : '';
+    if (open) { const first = nav.querySelector('a'); if (first) first.focus(); }
+    else if (toggle) toggle.focus();
+}
+function toggleNav() { setNav(!document.getElementById('mainNav').classList.contains('open')); }
+function closeNav() { setNav(false); }
+
 /* ===== Settings ===== */
+/* Applied to <html> as soon as the server accepts it, rather than reloading the page:
+   picking a text size is a thing you do by trying sizes, and a reload between each
+   try loses the Settings page you were looking at. The samples are re-sized with it
+   so each keeps showing the absolute size it stands for rather than growing too. */
+function applyFontScale(scale) {
+    document.documentElement.style.fontSize = scale + '%';
+    document.querySelectorAll('#textSizeOptions .text-size-option').forEach(btn => {
+        const s = Number(btn.dataset.scale);
+        const active = s === scale;
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+        const sample = btn.querySelector('.text-size-sample');
+        if (sample) sample.style.fontSize = `calc(1rem * ${s} / ${scale})`;
+    });
+}
+
+function saveFontScale(scale) {
+    api('/api/settings/font-scale', 'POST', { scale })
+        .then(() => {
+            applyFontScale(scale);
+            showToast(t('Text size saved'));
+        })
+        .catch(err => showToast(err.message, 'error'));
+}
+
 function saveLanguage(e) {
     e.preventDefault();
     api('/api/settings/language', 'POST', {
@@ -189,6 +268,8 @@ function renderReservationDrift(drift) {
                 ${t('Correct held stock')}
             </button>
         </div>`;
+    // The table did not exist at load, so the startup pass never saw it.
+    watchTableLabels(box);
 }
 
 function repairReservations() {
@@ -689,7 +770,7 @@ function openPaymentModal(id) {
         document.getElementById('payProofCurrent').innerHTML = o.has_payment_proof
             ? `<p class="help-text">
                    <a href="/api/orders/${o.id}/proof" target="_blank" rel="noopener">${t('View current proof')}</a>
-                   <label style="margin-left:12px">
+                   <label style="margin-left:0.75rem">
                        <input type="checkbox" id="payRemoveProof"> ${t('Remove it')}
                    </label>
                </p>`
@@ -731,7 +812,7 @@ function viewOrder(id) {
             <p><strong>${t('Payment Proof')}:</strong> ${o.has_payment_proof
                 ? `<a href="/api/orders/${o.id}/proof" target="_blank" rel="noopener">${t('View proof')}</a>`
                 : t('Not recorded')}</p>
-            <table class="data-table" style="margin:12px 0">
+            <table class="data-table" style="margin:0.75rem 0">
                 <thead><tr><th>${t('Product')}</th><th>${t('Qty')}</th><th>${t('Price')}</th><th>${t('Subtotal')}</th></tr></thead>
                 <tbody>
                     ${(o.items || []).map(i => `
@@ -744,9 +825,12 @@ function viewOrder(id) {
                     `).join('')}
                 </tbody>
             </table>
-            <p style="text-align:right;font-size:18px;font-weight:700">${t('Total')}: ${formatRupiah(o.total_amount)}</p>
+            <p style="text-align:right;font-size:var(--fs-md);font-weight:700">${t('Total')}: ${formatRupiah(o.total_amount)}</p>
         `;
-        document.getElementById('orderDetailContent').innerHTML = html;
+        const box = document.getElementById('orderDetailContent');
+        box.innerHTML = html;
+        // Built here rather than in the template, so the startup pass never saw it.
+        watchTableLabels(box);
         document.getElementById('orderDetailModal').classList.add('active');
     }).catch(() => { /* fetchJson has toasted; there is no order to show */ });
 }
@@ -989,21 +1073,30 @@ function addRestockItem() {
     const idx = document.getElementById('restockItems').children.length;
     const div = document.createElement('div');
     div.className = 'restock-item-row';
+    /* Every control carries its own label. The placeholders that used to stand in for
+       one are never seen -- both number fields start with a value, so the placeholder
+       is painted over before the page is drawn -- and the header row above them is
+       hidden on a phone, which left two unlabelled number boxes. .row-label is read by
+       a screen reader at any width and becomes visible when the header row goes. */
     div.innerHTML = `
         <div class="form-group">
+            <label class="row-label" for="restock-product-${idx}">${t('Product')}</label>
             <select id="restock-product-${idx}" onchange="prefillRestockCost(this)">
                 <option value="">${t('Select product')}</option>
                 ${PRODUCTS.map(p => `<option value="${p.id}">${escapeHtml(p.name)} (${escapeHtml(p.sku || '-')}) - ${t('Stock: {n}', { n: p.stock })}</option>`).join('')}
             </select>
         </div>
         <div class="form-group">
+            <label class="row-label" for="restock-qty-${idx}">${t('Qty')}</label>
             <input type="number" id="restock-qty-${idx}" min="1" value="1" placeholder="${t('Qty')}" oninput="updateRestockTotals()">
         </div>
         <div class="form-group">
+            <label class="row-label" for="restock-price-${idx}">${t('Price per unit')}</label>
             <input type="number" id="restock-price-${idx}" min="0" value="0" placeholder="${t('Price per unit')}" oninput="updateRestockTotals()">
         </div>
         <div class="form-group">
-            <button class="btn-remove-item" onclick="this.closest('.restock-item-row').remove(); updateRestockTotals();">&times;</button>
+            <button class="btn-remove-item" aria-label="${t('Remove item')}"
+                    onclick="this.closest('.restock-item-row').remove(); updateRestockTotals();">&times;</button>
         </div>
     `;
     document.getElementById('restockItems').appendChild(div);
@@ -1177,7 +1270,7 @@ function loadRestockHistory() {
                         ${voidCell(b, 'voidRestock')}
                     </tr>
                     <tr class="restock-detail-row" style="display:none">
-                        <td colspan="5" style="background:#f8f9ff;padding:12px 16px;font-size:13px;color:#555">
+                        <td colspan="5" style="background:#f8f9ff;padding:0.75rem 1rem;font-size:var(--fs-sm);color:#4a4a4a">
                             ${detail}
                         </td>
                     </tr>
@@ -1193,18 +1286,22 @@ function addSelfUseItem() {
     const idx = document.getElementById('selfUseItems').children.length;
     const div = document.createElement('div');
     div.className = 'self-use-item-row';
+    /* Labelled per control for the same reason as the restock row above. */
     div.innerHTML = `
         <div class="form-group">
+            <label class="row-label" for="selfuse-product-${idx}">${t('Product')}</label>
             <select id="selfuse-product-${idx}" onchange="calcSelfUseTotal()">
                 <option value="">${t('Select product')}</option>
                 ${PRODUCTS.map(p => `<option value="${p.id}">${escapeHtml(p.name)} (${escapeHtml(p.sku || '-')}) - ${t('Stock: {n}', { n: p.stock })}</option>`).join('')}
             </select>
         </div>
         <div class="form-group">
+            <label class="row-label" for="selfuse-qty-${idx}">${t('Qty')}</label>
             <input type="number" id="selfuse-qty-${idx}" min="1" value="1" placeholder="${t('Qty')}" oninput="calcSelfUseTotal()">
         </div>
         <div class="form-group">
-            <button class="btn-remove-item" onclick="this.closest('.self-use-item-row').remove(); calcSelfUseTotal();">&times;</button>
+            <button class="btn-remove-item" aria-label="${t('Remove item')}"
+                    onclick="this.closest('.self-use-item-row').remove(); calcSelfUseTotal();">&times;</button>
         </div>
     `;
     document.getElementById('selfUseItems').appendChild(div);
@@ -1273,7 +1370,7 @@ function loadSelfUseHistory() {
                         ${voidCell(b, 'voidSelfUse')}
                     </tr>
                     <tr class="self-use-detail-row" style="display:none">
-                        <td colspan="5" style="background:#f8f9ff;padding:12px 16px;font-size:13px;color:#555">
+                        <td colspan="5" style="background:#f8f9ff;padding:0.75rem 1rem;font-size:var(--fs-sm);color:#4a4a4a">
                             ${productList}
                         </td>
                     </tr>
@@ -1284,6 +1381,17 @@ function loadSelfUseHistory() {
 
 /* ===== Init ===== */
 document.addEventListener('DOMContentLoaded', () => {
+    watchTableLabels();
+    /* Escape closes the drawer, and following a link inside it should not leave the
+       menu covering the page it navigated to. */
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') {
+            const nav = document.getElementById('mainNav');
+            if (nav && nav.classList.contains('open')) closeNav();
+        }
+    });
+    document.querySelectorAll('.nav-links a').forEach(a => a.addEventListener('click', closeNav));
+
     if (document.getElementById('productsBody')) {
         // ?needs_cost=1 arrives from the profit notes elsewhere; reflect it in the chip
         // so the filtered view does not look like the whole catalogue.

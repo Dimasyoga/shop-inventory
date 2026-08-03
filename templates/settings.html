@@ -23,6 +23,25 @@
     </form>
 </div>
 
+{# Each option is drawn at the size it would produce -- 1rem is already the current
+   scale, so dividing it back out gives the true absolute size whatever is in force.
+   The choice is made by looking, rather than by reading "115%" and guessing. #}
+{% set scale_names = {100: t('Normal'), 115: t('Large'), 130: t('Larger'), 150: t('Largest')} %}
+<div class="card">
+    <h3>🔍 {{ t('Text size') }}</h3>
+    <p class="help-text">{{ t('Makes every word and button in the web app bigger. Takes effect straight away, on this and any other device you sign in from.') }}</p>
+    <div class="text-size-options" id="textSizeOptions">
+        {% for scale in font_scales %}
+        <button type="button" class="text-size-option {% if scale == font_scale %}active{% endif %}"
+                data-scale="{{ scale }}" aria-pressed="{{ 'true' if scale == font_scale else 'false' }}"
+                onclick="saveFontScale({{ scale }})">
+            <span class="text-size-sample" style="font-size: calc(1rem * {{ scale }} / {{ font_scale }})">Aa</span>
+            <span class="text-size-name">{{ scale_names.get(scale, scale ~ '%') }}</span>
+        </button>
+        {% endfor %}
+    </div>
+</div>
+
 <div class="card">
     <h3>🤖 {{ t('Telegram Bot') }}</h3>
     <p class="help-text">

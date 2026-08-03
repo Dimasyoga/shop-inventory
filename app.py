@@ -279,6 +279,28 @@ def get_lang():
     from database import get_setting
     return i18n.normalize_lang(get_setting(g.db, 'language', i18n.DEFAULT_LANG))
 
+# Text scale, as a percentage of the browser's own default font size. Rendered onto
+# <html> so every rem in style.css follows it. A percentage rather than a pixel size
+# because it *multiplies* whatever the phone is already set to: a reader who has
+# turned their system text up keeps that, and picking "Large" here enlarges from
+# there instead of overriding it back down.
+FONT_SCALES = (100, 115, 130, 150)
+DEFAULT_FONT_SCALE = 100
+
+def get_font_scale():
+    """Active text scale as an int percentage, always one of FONT_SCALES.
+
+    A stored value that is missing, unparseable or no longer offered falls back to
+    the default rather than raising: an unreadable page is the one failure mode
+    that would stop the shop owner from getting back to Settings to fix it."""
+    from database import get_setting
+    raw = get_setting(g.db, 'ui_font_scale', str(DEFAULT_FONT_SCALE))
+    try:
+        scale = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_FONT_SCALE
+    return scale if scale in FONT_SCALES else DEFAULT_FONT_SCALE
+
 def _service_error(e):
     """JSON response for a ServiceError, translated to the active language."""
     return jsonify({'error': i18n.translate_error(e, i18n.make_t(get_lang()))}), e.status
@@ -299,6 +321,10 @@ def inject_i18n():
         'lang': lang,
         'languages': i18n.LANGUAGES,
         'i18n_js': i18n.js_table(lang),
+        # Every page, not just the ones that ask: the scale is written into the
+        # <html> tag so the first paint is already the right size. Applying it from
+        # JS after load would show a flash of small text on every navigation.
+        'font_scale': get_font_scale(),
     }
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -903,6 +929,7 @@ def settings_page():
         order_alert_hours=get_setting(g.db, 'order_alert_hours', '24'),
         monthly_report_enabled=get_setting(g.db, 'monthly_report_enabled', '1') == '1',
         current_lang=get_lang(),
+        font_scales=FONT_SCALES,
         username=session.get('username', ''))
 
 @app.route('/api/settings/language', methods=['POST'])
@@ -916,6 +943,23 @@ def api_settings_language():
     if lang not in i18n.LANGUAGES:
         return _err('Unsupported language')
     set_setting(g.db, 'language', lang)
+    g.db.commit()
+    return jsonify({'success': True})
+
+@app.route('/api/settings/font-scale', methods=['POST'])
+@login_required
+def api_settings_font_scale():
+    from database import set_setting
+    data = _json_body()
+    if data is None:
+        return _err('Invalid JSON body')
+    try:
+        scale = int(data.get('scale'))
+    except (TypeError, ValueError):
+        return _err('Unsupported text size')
+    if scale not in FONT_SCALES:
+        return _err('Unsupported text size')
+    set_setting(g.db, 'ui_font_scale', str(scale))
     g.db.commit()
     return jsonify({'success': True})
 

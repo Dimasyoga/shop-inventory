@@ -28,6 +28,41 @@ A Flask-based shop inventory management system built with Python 3.13, SQLite, a
 - Low stock alerts and reorder thresholds
 - Telegram bot with button-driven menus and stale-order alerts (see below)
 - Bilingual interface — English and Bahasa Indonesia (see below)
+- Built for a phone, and for a reader who needs it big: adjustable text size and a
+  layout that reflows rather than shrinks (see below)
+
+### Text Size and Phones
+
+The web app is meant to be run from a phone, by someone who may not enjoy reading
+small print. Two things follow from that.
+
+**Text size** is set under **Settings → Text size**: Normal, Large, Larger or
+Largest. Each option is drawn at the size it produces, so the choice is made by
+looking rather than by reading a percentage. Picking one takes effect immediately and
+everywhere — it is a shop-wide setting, like the language, so it follows you to any
+device you sign in from, and it applies to the sign-in page too.
+
+The sizes are *multipliers* of whatever your phone is already set to, not fixed pixel
+sizes. If you have turned the system text up in your phone's own accessibility
+settings, that is where "Normal" starts, and "Largest" enlarges from there rather than
+overriding you back down. Everything moves together — buttons, form fields, table rows
+and the menu all grow with the words, so nothing ends up as big text in a small box.
+
+**On a narrow screen** the layout changes shape rather than shrinking:
+
+- The menu becomes a **☰ button** in the top bar, opening a full list with the name of
+  every page spelled out. Tap anywhere beside it, or the ✕, to close it.
+- **Tables become cards.** A seven-column orders table does not fit a phone at any
+  readable size, so each row is redrawn as a labelled block — no sideways scrolling and
+  nothing cut off.
+- **Buttons say what they do.** On a desktop the small icon buttons explain themselves
+  when you hover over them; a touch screen has no hover, so on a phone the label is
+  printed beside the icon.
+- Every button and field is at least a finger wide, and no text field is small enough
+  to make Safari zoom the page in when you tap it.
+
+The desktop layout is unchanged — the sidebar is still there, and tables are still
+tables.
 
 ### Language
 
@@ -338,6 +373,18 @@ Notes:
 - Text is rendered with vendored DejaVu TTFs (`static/fonts/`) rather than a
   built-in Latin-1 font, so a product name with a curly quote or an emoji cannot
   break the report
+
+#### Settings (`/settings`)
+
+- **Language** — English or Bahasa Indonesia, for the web app and the bot alike
+- **Text size** — Normal, Large, Larger or Largest; see *Text Size and Phones* above
+- **Telegram Bot** — token, whitelist, shop timezone, stale-order threshold, and
+  whether the monthly report is sent automatically
+- **Account** — change the username or password
+- **Data integrity** — check, and then repair, stock held by open orders when the
+  count has drifted from the orders holding it (see *Held Stock* below)
+
+All of these are shop-wide settings rather than per-device or per-account ones.
 
 ---
 

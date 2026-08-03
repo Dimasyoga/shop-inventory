@@ -29,14 +29,14 @@
 
 <!-- New Order Modal -->
 <div class="modal" id="orderModal">
-    <div class="modal-content" style="max-width: 600px">
+    <div class="modal-content" style="max-width: 37.5rem">
         <div class="modal-header">
             <h3 id="orderModalTitle">{{ t('New Order') }}</h3>
             <span class="modal-close" onclick="closeOrderModal()">&times;</span>
         </div>
-        <div id="orderItems" style="margin-bottom:16px"></div>
-        <button class="btn btn-secondary" onclick="addOrderItem()" style="margin-bottom:16px">{{ t('+ Add Item') }}</button>
-        <div style="text-align:right;font-size:18px;font-weight:700;margin-bottom:16px">
+        <div id="orderItems" style="margin-bottom:1rem"></div>
+        <button class="btn btn-secondary" onclick="addOrderItem()" style="margin-bottom:1rem">{{ t('+ Add Item') }}</button>
+        <div style="text-align:right;font-size:var(--fs-md);font-weight:700;margin-bottom:1rem">
             {{ t('Total') }}: <span id="orderTotal">Rp 0</span>
         </div>
         <div class="modal-actions">
@@ -50,7 +50,7 @@
      a transfer receipt usually turns up after the order was entered, so this has to
      be reachable on an order that is no longer a draft and can no longer be edited. -->
 <div class="modal" id="paymentModal">
-    <div class="modal-content" style="max-width: 520px">
+    <div class="modal-content" style="max-width: 32.5rem">
         <div class="modal-header">
             <h3 id="paymentModalTitle">{{ t('Buyer & Payment') }}</h3>
             <span class="modal-close" onclick="closePaymentModal()">&times;</span>
@@ -85,7 +85,7 @@
 
 <!-- Order Detail Modal -->
 <div class="modal" id="orderDetailModal">
-    <div class="modal-content" style="max-width: 600px">
+    <div class="modal-content" style="max-width: 37.5rem">
         <div class="modal-header">
             <h3 id="detailOrderId">{{ t('Order ID') }}</h3>
             <span class="modal-close" onclick="closeOrderDetail()">&times;</span>

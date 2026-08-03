@@ -20,8 +20,9 @@ bilingual (English / Bahasa Indonesia).
 | `telegram_bot.py` | Bot API client, screen renderers, stateful order/restock flows, monthly-report delivery, and the `BotPoller` daemon thread. Must **not** import `app.py`. |
 | `database.py` | Schema (`init_db`), idempotent migrations, `get_setting`/`set_setting`, DB connection. |
 | `i18n.py` | `TRANSLATIONS` table (English source string → translation), `make_t(lang)`, calendar names. Shared by templates, `app.js`, and the bot. |
-| `templates/*.html` | Jinja templates; `settings.html` holds Telegram/language/account config. |
+| `templates/*.html` | Jinja templates; `settings.html` holds Telegram/language/text-size/account config. `base.html` carries the text scale on `<html>` and the mobile nav drawer. |
 | `static/js/app.js` | Client JS; `t(...)` mirrors the server translator. |
+| `static/css/style.css` | The whole stylesheet. Text sizes in `rem` so the text-scale setting moves them; one 768px breakpoint holds the phone layout. |
 | `tests/` | pytest. `conftest.py` has `db_path` (temp DB), `client`, `insert` fixtures. |
 | `tests/browser/` | Playwright against a real server. `conftest.py` has `live_server`, `shop` (seeding + stock assertions) and a signed-in `page`. |
 
@@ -256,6 +257,31 @@ bilingual (English / Bahasa Indonesia).
   settings row, because an in-memory deadline re-fires on every restart. A marker
   that is absent means "no history", and must plant itself without acting rather
   than backfilling.
+- **The interface is sized for a reader who needs it big, on a phone.** Every size
+  that carries text is a `rem` in `static/css/style.css`; a `px` font-size, padding or
+  width in a rule that holds words is a bug. The multiplier is one settings row,
+  `ui_font_scale` (a percentage — `app.FONT_SCALES`, validated by `app.get_font_scale`,
+  which falls back rather than raising, because a page rendered at an unreadable size
+  is a page the shop owner cannot reach Settings from). It is rendered onto `<html>` by
+  the context processor, in the tag itself: applying it from JS would flash small text
+  on every navigation. A percentage rather than a pixel size because it *multiplies*
+  whatever the phone is already set to, so a reader who has turned their system text
+  up keeps that. Borders, radii, shadows and the 768px breakpoint stay in px — they are
+  trim and glass, not text. Below that breakpoint the sidebar is an off-canvas drawer
+  (`toggleNav`), every `.data-table` stops being a table and lays each row out as
+  labelled blocks, and `--tap` (2.75rem) is the floor for anything a finger hits.
+  Two consequences worth knowing before editing a row renderer or an icon button:
+  the card labels are copied from the table's own `<thead>` by `labelTableCells` /
+  `watchTableLabels` in `app.js` rather than written at each of the fifteen render
+  sites — a table built after load needs `watchTableLabels(container)`, and a `<td>`
+  with a `colspan` is deliberately left unlabelled. And an icon button's `title` is
+  drawn beside the icon on a phone via `content: attr(title)`, because a touch screen
+  has no hover: an orders row was five unlabelled emoji. So a new icon button needs a
+  translated `title` (or `aria-label` on `.btn-remove-item`) to be usable at all — it
+  is the label, not a tooltip. `tests/browser/test_mobile_ui.py` pins the lot at a
+  390x844 viewport; the checks that matter most there are the ones no unit test can
+  ask, particularly that no page scrolls sideways and that no input is under 16px,
+  which is the size at which Safari zooms the whole page on focus.
 
 ## Running things
 

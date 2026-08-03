@@ -1,33 +1,52 @@
 <!DOCTYPE html>
-<html lang="{{ lang }}">
+{# The shop's chosen text scale is written here rather than applied by script, so the
+   first paint is already the right size on every page. font_scale comes from the
+   context processor and is one of app.FONT_SCALES, so it is a bare integer. #}
+<html lang="{{ lang }}" style="font-size: {{ font_scale }}%">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#1a1a2e">
     <title>{% block title %}{{ t('Shop Inventory') }}{% endblock %}</title>
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
     {% if 'user_id' in session %}
-    <nav class="sidebar">
+    <a class="skip-link" href="#main">{{ t('Skip to content') }}</a>
+    {# Phones only (the sidebar is off-canvas below 768px); hidden by CSS on desktop. #}
+    <header class="topbar">
+        <button type="button" class="topbar-toggle" id="navToggle"
+                aria-label="{{ t('Menu') }}" aria-expanded="false" aria-controls="mainNav"
+                onclick="toggleNav()">☰</button>
+        <span class="topbar-title">📦 {{ t('Shop Inventory') }}</span>
+    </header>
+    <div class="nav-scrim" id="navScrim" onclick="closeNav()"></div>
+    <nav class="sidebar" id="mainNav">
         <div class="sidebar-header">
             <h1>📦 {{ t('Shop Inventory') }}</h1>
+            <button type="button" class="nav-close" aria-label="{{ t('Close menu') }}"
+                    onclick="closeNav()">&times;</button>
         </div>
+        {# The label is a full word on every screen, and the emoji is marked
+           aria-hidden so a screen reader announces "Dashboard", not "bar chart
+           Dashboard". An icon-only rail was the old mobile layout; it asked the
+           reader to remember what each picture stood for. #}
         <ul class="nav-links">
-            <li><a href="{{ url_for('dashboard') }}" class="{% if request.endpoint == 'dashboard' %}active{% endif %}">📊 {{ t('Dashboard') }}</a></li>
-            <li><a href="{{ url_for('products_page') }}" class="{% if request.endpoint == 'products_page' %}active{% endif %}">📦 {{ t('Products') }}</a></li>
-            <li><a href="{{ url_for('orders_page') }}" class="{% if request.endpoint == 'orders_page' %}active{% endif %}">🛒 {{ t('Orders') }}</a></li>
-            <li><a href="{{ url_for('restock_page') }}" class="{% if request.endpoint == 'restock_page' %}active{% endif %}">📥 {{ t('Restock') }}</a></li>
-            <li><a href="{{ url_for('self_use_page') }}" class="{% if request.endpoint == 'self_use_page' %}active{% endif %}">🏠 {{ t('Self Use') }}</a></li>
-            <li><a href="{{ url_for('sales_page') }}" class="{% if request.endpoint == 'sales_page' %}active{% endif %}">📈 {{ t('Sales') }}</a></li>
-            <li><a href="{{ url_for('stock_history_page') }}" class="{% if request.endpoint == 'stock_history_page' %}active{% endif %}">🧾 {{ t('Stock History') }}</a></li>
-            <li><a href="{{ url_for('settings_page') }}" class="{% if request.endpoint == 'settings_page' %}active{% endif %}">⚙️ {{ t('Settings') }}</a></li>
+            <li><a href="{{ url_for('dashboard') }}" class="{% if request.endpoint == 'dashboard' %}active{% endif %}"><span class="nav-icon" aria-hidden="true">📊</span><span>{{ t('Dashboard') }}</span></a></li>
+            <li><a href="{{ url_for('products_page') }}" class="{% if request.endpoint == 'products_page' %}active{% endif %}"><span class="nav-icon" aria-hidden="true">📦</span><span>{{ t('Products') }}</span></a></li>
+            <li><a href="{{ url_for('orders_page') }}" class="{% if request.endpoint == 'orders_page' %}active{% endif %}"><span class="nav-icon" aria-hidden="true">🛒</span><span>{{ t('Orders') }}</span></a></li>
+            <li><a href="{{ url_for('restock_page') }}" class="{% if request.endpoint == 'restock_page' %}active{% endif %}"><span class="nav-icon" aria-hidden="true">📥</span><span>{{ t('Restock') }}</span></a></li>
+            <li><a href="{{ url_for('self_use_page') }}" class="{% if request.endpoint == 'self_use_page' %}active{% endif %}"><span class="nav-icon" aria-hidden="true">🏠</span><span>{{ t('Self Use') }}</span></a></li>
+            <li><a href="{{ url_for('sales_page') }}" class="{% if request.endpoint == 'sales_page' %}active{% endif %}"><span class="nav-icon" aria-hidden="true">📈</span><span>{{ t('Sales') }}</span></a></li>
+            <li><a href="{{ url_for('stock_history_page') }}" class="{% if request.endpoint == 'stock_history_page' %}active{% endif %}"><span class="nav-icon" aria-hidden="true">🧾</span><span>{{ t('Stock History') }}</span></a></li>
+            <li><a href="{{ url_for('settings_page') }}" class="{% if request.endpoint == 'settings_page' %}active{% endif %}"><span class="nav-icon" aria-hidden="true">⚙️</span><span>{{ t('Settings') }}</span></a></li>
         </ul>
         <div class="sidebar-footer">
             <span>👤 {{ session.get('username', '') }}</span>
             <a href="{{ url_for('logout') }}">{{ t('Logout') }}</a>
         </div>
     </nav>
-    <main class="content">
+    <main class="content" id="main">
         {% block content %}{% endblock %}
     </main>
     {% endif %}

@@ -1,35 +1,48 @@
 <!DOCTYPE html>
-<html lang="{{ lang }}">
+{# The text scale is read before sign-in too. It is a shop-wide setting rather than a
+   per-account one, and the login box is the first thing the shop owner has to read. #}
+<html lang="{{ lang }}" style="font-size: {{ font_scale }}%">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#1a1a2e">
     <title>{{ t('Login') }} - {{ t('Shop Inventory') }}</title>
     <link rel="stylesheet" href="/static/css/style.css">
     <style>
         .login-container {
             display: flex; justify-content: center; align-items: center;
-            min-height: 100vh; background: #f0f2f5;
+            min-height: 100vh; background: #f0f2f5; padding: 1rem;
         }
+        /* Was a fixed 360px, which overflowed the narrowest phones and could not grow
+           with the text scale. */
         .login-box {
-            background: white; padding: 40px; border-radius: 12px;
-            box-shadow: 0 2px 16px rgba(0,0,0,0.1); width: 360px;
+            background: white; padding: 2rem; border-radius: 12px;
+            box-shadow: 0 2px 16px rgba(0,0,0,0.1);
+            width: 100%; max-width: 24rem;
         }
-        .login-box h1 { text-align: center; margin-bottom: 8px; color: #1a1a2e; }
-        .login-box p { text-align: center; color: #666; margin-bottom: 24px; }
-        .form-group { margin-bottom: 16px; }
-        .form-group label { display: block; margin-bottom: 4px; font-weight: 600; color: #333; }
+        .login-box h1 { text-align: center; margin-bottom: 0.5rem; color: var(--ink); font-size: var(--fs-lg); }
+        .login-box p { text-align: center; color: var(--muted); margin-bottom: 1.5rem; }
+        .form-group { margin-bottom: 1rem; }
+        .form-group label {
+            display: block; margin-bottom: 0.25rem; font-weight: 600;
+            color: var(--text); font-size: var(--fs-base);
+        }
+        /* 1rem, never less: Safari zooms the page in when a field under 16px is
+           focused, and the box then sits half off the screen. */
         .form-group input {
-            width: 100%; padding: 10px 12px; border: 1px solid #ddd;
-            border-radius: 6px; font-size: 14px; box-sizing: border-box;
+            width: 100%; padding: 0.625rem 0.75rem; border: 1px solid #ddd;
+            border-radius: 6px; font-size: var(--fs-base);
+            min-height: var(--tap); box-sizing: border-box;
         }
         .btn-login {
-            width: 100%; padding: 12px; background: #4361ee; color: white;
-            border: none; border-radius: 6px; font-size: 16px; cursor: pointer;
+            width: 100%; padding: 0.75rem; background: var(--accent); color: white;
+            border: none; border-radius: 6px; font-size: var(--fs-md);
+            min-height: var(--tap); cursor: pointer;
         }
         .btn-login:hover { background: #3a56d4; }
         .error-msg {
-            background: #ffe0e0; color: #d32f2f; padding: 8px 12px;
-            border-radius: 6px; margin-bottom: 16px; font-size: 14px;
+            background: #ffe0e0; color: #b3261e; padding: 0.75rem;
+            border-radius: 6px; margin-bottom: 1rem; font-size: var(--fs-base);
         }
     </style>
 </head>
@@ -43,12 +56,14 @@
             {% endif %}
             <form method="POST" action="{{ url_for('login') }}">
                 <div class="form-group">
-                    <label>{{ t('Username') }}</label>
-                    <input type="text" name="username" required autofocus>
+                    <label for="loginUsername">{{ t('Username') }}</label>
+                    <input type="text" id="loginUsername" name="username" required autofocus
+                           autocomplete="username" autocapitalize="none" autocorrect="off">
                 </div>
                 <div class="form-group">
-                    <label>{{ t('Password') }}</label>
-                    <input type="password" name="password" required>
+                    <label for="loginPassword">{{ t('Password') }}</label>
+                    <input type="password" id="loginPassword" name="password" required
+                           autocomplete="current-password">
                 </div>
                 <button type="submit" class="btn-login">{{ t('Sign In') }}</button>
             </form>

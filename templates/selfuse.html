@@ -13,12 +13,12 @@
         <div class="form-group"><label>&nbsp;</label></div>
     </div>
     <div id="selfUseItems"></div>
-    <button class="btn btn-secondary" onclick="addSelfUseItem()" style="margin-bottom:16px">{{ t('+ Add Product') }}</button>
+    <button class="btn btn-secondary" onclick="addSelfUseItem()" style="margin-bottom:1rem">{{ t('+ Add Product') }}</button>
     {# Value is derived from the products' retail price, not typed by the seller,
        so this is a read-only figure rather than the input restock uses. #}
-    <div class="form-group" style="margin-top:12px">
+    <div class="form-group" style="margin-top:0.75rem">
         <label>{{ t('Total Value') }}</label>
-        <div id="selfUseTotal" style="font-size:20px;font-weight:700">Rp 0</div>
+        <div id="selfUseTotal" style="font-size:var(--fs-lg);font-weight:700">Rp 0</div>
     </div>
     <div class="modal-actions">
         <button type="button" class="btn btn-primary" onclick="submitSelfUse()">{{ t('Submit Self Use') }}</button>
@@ -27,7 +27,7 @@
 
 <div class="card">
     <h3>{{ t('Self Use History') }}</h3>
-    <div class="period-selector" data-history="selfuse" style="margin-bottom:16px">
+    <div class="period-selector" data-history="selfuse" style="margin-bottom:1rem">
         <button class="btn btn-period active" data-period="all">{{ t('All Time') }}</button>
         <button class="btn btn-period" data-period="today">{{ t('Today') }}</button>
         <button class="btn btn-period" data-period="week">{{ t('This Week') }}</button>

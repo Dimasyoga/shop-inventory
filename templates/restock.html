@@ -15,19 +15,19 @@
         <div class="form-group"><label>&nbsp;</label></div>
     </div>
     <div id="restockItems"></div>
-    <button class="btn btn-secondary" onclick="addRestockItem()" style="margin-bottom:16px">{{ t('+ Add Product') }}</button>
+    <button class="btn btn-secondary" onclick="addRestockItem()" style="margin-bottom:1rem">{{ t('+ Add Product') }}</button>
     <div class="restock-charges">
         <div class="form-group">
             <label>{{ t('Discount') }}</label>
-            <input type="number" id="restockDiscountInput" min="0" value="0" oninput="updateRestockTotals()" style="width:160px">
+            <input type="number" id="restockDiscountInput" min="0" value="0" oninput="updateRestockTotals()" style="width:10rem">
         </div>
         <div class="form-group">
             <label>{{ t('Shipping') }}</label>
-            <input type="number" id="restockShippingInput" min="0" value="0" oninput="updateRestockTotals()" style="width:160px">
+            <input type="number" id="restockShippingInput" min="0" value="0" oninput="updateRestockTotals()" style="width:10rem">
         </div>
         <div class="form-group">
             <label>{{ t('Admin Fee') }}</label>
-            <input type="number" id="restockAdminFeeInput" min="0" value="0" oninput="updateRestockTotals()" style="width:160px">
+            <input type="number" id="restockAdminFeeInput" min="0" value="0" oninput="updateRestockTotals()" style="width:10rem">
         </div>
     </div>
     <div id="restockTotals" class="restock-totals"></div>
@@ -38,7 +38,7 @@
 
 <div class="card">
     <h3>{{ t('Restock History') }}</h3>
-    <div class="period-selector" data-history="restock" style="margin-bottom:16px">
+    <div class="period-selector" data-history="restock" style="margin-bottom:1rem">
         <button class="btn btn-period active" data-period="all">{{ t('All Time') }}</button>
         <button class="btn btn-period" data-period="today">{{ t('Today') }}</button>
         <button class="btn btn-period" data-period="week">{{ t('This Week') }}</button>
